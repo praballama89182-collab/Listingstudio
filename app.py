@@ -152,10 +152,10 @@ with st.sidebar:
     st.caption("**Field limits**  \nTitle 75 · Highlights 125 · Bullets 150–200 each, "
                "1000 total · Search terms 249 bytes")
 
-tabs = st.tabs(["Build a listing", "Improve a listing", "Listing images",
-                "AI generation", "Keyword research", "Rules"])
+# Tabs placed in precise requested sequence
+tabs = st.tabs(["Build a listing", "Improve a listing", "Keyword research", "Rules", "Listing images", "AI generation"])
 
-# ================================================================ BUILD
+# ================================================================ BUILD (Tab 0)
 with tabs[0]:
     st.markdown("### Product details")
     st.caption("Fields are read in priority order. Whatever will not fit the 75-character title "
@@ -164,7 +164,8 @@ with tabs[0]:
 
     def clear_build():
         for k in ("f_brand","f_type","f_a1","f_a2","f_a3","f_a4","f_usp","f_size","f_use","f_feat"):
-            st.session_state[k] = ""
+            if k in st.session_state:
+                st.session_state[k] = ""
 
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
@@ -269,7 +270,7 @@ with tabs[0]:
     else:
         st.info("Enter a brand name and a product type to see the listing.")
 
-# ================================================================ IMPROVE
+# ================================================================ IMPROVE (Tab 1)
 with tabs[1]:
     st.markdown("### Paste your current listing")
     st.caption("The raw title is mined for features. Attribute 1 & 2 take priority, Size & Gender "
@@ -364,7 +365,138 @@ with tabs[1]:
     else:
         st.info("Paste a title to see the rebuilt listing.")
 
-# ================================================================ IMAGES
+# ================================================================ KEYWORDS (Tab 2)
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+      "Chrome/124.0 Safari/537.36")
+MARKETS = {"amazon.com (US)": "ATVPDKIKX0DER", "amazon.co.uk (UK)": "A1F83G8C2ARO7P",
+           "amazon.de (DE)": "A1PA6795UKMFR9", "amazon.ca (CA)": "A2EUQ1WTGCTBG2",
+           "amazon.in (IN)": "A21TJRUUN4KGV"}
+
+def _get(url, timeout=6):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+def _google(seed):
+    d = _get("https://suggestqueries.google.com/complete/search?client=firefox&q="
+             + urllib.parse.quote(seed))
+    return [str(x) for x in d[1]] if isinstance(d, list) and len(d) > 1 else []
+
+def _amazon(seed, mid):
+    d = _get("https://completion.amazon.com/api/2017/suggestions?mid=" + mid
+             + "&alias=aps&limit=11&prefix=" + urllib.parse.quote(seed))
+    return [s.get("value", "") for s in d.get("suggestions", []) if s.get("value")] \
+        if isinstance(d, dict) else []
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch(seed, source, mid, expand):
+    seed = C.ws(seed)
+    if not seed: return [], "Enter a seed keyword."
+    seeds = [seed] + ([f"{seed} {c}" for c in "abcdefghijklmnopqrstuvwxyz"] if expand else [])
+    fn = (lambda s: _google(s)) if source == "Google" else (lambda s: _amazon(s, mid))
+    rank, freq, disp, errs = {}, {}, {}, []
+    def safe(s):
+        try: return fn(s)
+        except Exception as e: errs.append(str(e)); return []
+    try:
+        with ThreadPoolExecutor(max_workers=8) as p:
+            for got in p.map(safe, seeds):
+                for i, term in enumerate(got):
+                    t = C.ws(term); k = t.lower()
+                    if not t: continue
+                    disp.setdefault(k, t); freq[k] = freq.get(k, 0) + 1
+                    rank[k] = min(rank.get(k, 99), i)
+    except Exception as e:
+        return [], f"Could not reach {source}: {e}"
+    if not disp:
+        return [], "Could not reach suggestion engine."
+    rows = [{"term": disp[k], "rank": rank[k], "freq": freq[k],
+             "score": C.kw_score(rank[k], freq[k], source)} for k in disp]
+    rows.sort(key=lambda r: (-r["score"], r["rank"]))
+    return rows, ""
+
+with tabs[2]:
+    st.markdown("### Find keywords")
+    k1, k2, k3 = st.columns([2, 1, 1])
+    with k1:
+        st.markdown('<div class="lbl"><b>Seed keyword</b></div>', unsafe_allow_html=True)
+        seed = st.text_input("sd", key="k_seed", label_visibility="collapsed",
+                             placeholder="kids scooter helmet")
+    with k2:
+        st.markdown('<div class="lbl"><b>Source</b></div>', unsafe_allow_html=True)
+        src = st.selectbox("sr", ["Amazon", "Google"], label_visibility="collapsed")
+    with k3:
+        st.markdown('<div class="lbl"><b>Marketplace</b></div>', unsafe_allow_html=True)
+        mkt = st.selectbox("mk", list(MARKETS), label_visibility="collapsed",
+                           disabled=(src != "Amazon"))
+    expand = st.checkbox("Expand A to Z for long-tail terms (fetches 200+ suggestions)", value=True)
+    if st.button("Fetch keywords", type="primary", key="k_go"):
+        with st.spinner(f"Asking {src}…"):
+            rows, err = fetch(seed, src, MARKETS[mkt], expand)
+        st.session_state["k_rows"], st.session_state["k_err"] = rows, err
+        st.session_state["k_t"] = [r["term"] for r in rows if r["score"] >= 70][:4]
+        st.session_state["k_b"] = [r["term"] for r in rows if 45 <= r["score"] < 70][:6]
+        st.session_state["k_s"] = [r["term"] for r in rows if r["score"] < 45][:25]
+
+    if st.session_state.get("k_err"): st.warning(st.session_state["k_err"])
+    rows = st.session_state.get("k_rows", [])
+
+    if rows:
+        st.caption(f"Showing all {len(rows)} discovered keywords ordered by relevance/volume score:")
+        st.markdown("".join(
+            f'<span class="chip" style="background:{C.volume_colour(r["score"])[0]};'
+            f'color:{C.volume_colour(r["score"])[1]};border-color:{C.volume_colour(r["score"])[2]}">'
+            f'{C.esc(r["term"])} <b>{r["score"]}</b></span>' for r in rows),
+            unsafe_allow_html=True)
+
+    st.markdown("### Send each keyword where it belongs")
+    manual = st.text_area("mn", key="k_man", height=90, label_visibility="collapsed")
+    pool = list(dict.fromkeys([r["term"] for r in rows] + C.parse_lines(manual)
+                              + st.session_state.get("k_t", []) + st.session_state.get("k_b", [])
+                              + st.session_state.get("k_s", [])))
+    a1_, a2_, a3_ = st.columns(3)
+    with a1_:
+        sel_t = st.multiselect("Into title", pool, key="k_t", label_visibility="collapsed")
+    with a2_:
+        sel_b = st.multiselect("Into bullets", pool, key="k_b", label_visibility="collapsed")
+    with a3_:
+        sel_s = st.multiselect("Into search terms", pool, key="k_s", label_visibility="collapsed")
+
+    L = st.session_state.get("listing")
+    if not L:
+        st.info("Build or improve a listing first — it lands here automatically.")
+    else:
+        nt, alr, add, fail = C.force_into_title(L["title"], sel_t, L["brand"], lim, media)
+        nb, balr, badd, bfail = C.force_into_bullets(L["bullets"], sel_b,
+                                                     pool=L.get("features"), max_bullets=maxb)
+        back = C.build_backend(sel_s, exclude_text=f'{nt} {L["high"]} {" ".join(nb)}',
+                               brand=L["brand"])
+        au = [C.audit_title(nt, L["brand"], media), C.audit_highlights(L["high"])]
+        au += [C.audit_bullet(b, i + 1) for i, b in enumerate(nb)]
+        au += [C.audit_bullets_total(nb), C.audit_backend(back["terms"])]
+        st.markdown("---")
+        scorecard(au)
+        copy_out(nt, L["high"], nb, back["terms"], key="k")
+
+# ================================================================ RULES (Tab 3)
+with tabs[3]:
+    st.markdown("### The rules this tool enforces")
+    st.markdown(f"""
+**Title — {C.TITLE_LIMIT} characters**
+`[Brand] + [Attribute 1] + [Product Type], [Attribute 2], [Size / Gender]`
+Commas separate rather than brackets. Units are abbreviated (oz, lb, ct).
+
+**Item Highlights — {C.HIGHLIGHT_LIMIT} characters**
+`[Primary material or spec] ; [core differentiator or use case]`
+
+**Bullets — {C.BULLET_MIN} to {C.BULLET_MAX} characters each**
+`[ALL CAPS HEADER]: [benefit-first statement]; [supporting feature detail]`
+
+**Backend search terms — {C.BACKEND_BYTES} bytes**
+Unique single words, all lowercase, single spaces. Max 249 bytes.
+""")
+
+# ================================================================ LISTING IMAGES (Tab 4 - Placed at last)
 def _show_gallery(built, asin, keyprefix):
     files = []
     for i, (name, im, is_main) in enumerate(built):
@@ -396,7 +528,7 @@ def _pairs(txt, fallback=""):
         out.append((C.ws(a), C.ws(b) or fallback))
     return out
 
-with tabs[2]:
+with tabs[4]:
     st.markdown("### Build each image yourself")
     st.caption("Add as many slots as you need. Every slot picks its own template, carries its own "
                "headline and callouts, and can take its own background photo.")
@@ -469,8 +601,8 @@ with tabs[2]:
         except Exception as e:
             st.error(f"Could not render: {e}")
 
-# ================================================================ AI GENERATION
-with tabs[3]:
+# ================================================================ AI GENERATION (Tab 5 - Placed at last)
+with tabs[5]:
     st.markdown("### Generate the set automatically")
     st.caption("Upload the product photo and a background, point it at your copy, and the whole "
                "gallery is planned and rendered in one pass.")
@@ -537,133 +669,3 @@ with tabs[3]:
             _show_gallery(built, a_asin, "ai")
         except Exception as e:
             st.error(f"Could not generate: {e}")
-
-# ================================================================ KEYWORDS
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
-      "Chrome/124.0 Safari/537.36")
-MARKETS = {"amazon.com (US)": "ATVPDKIKX0DER", "amazon.co.uk (UK)": "A1F83G8C2ARO7P",
-           "amazon.de (DE)": "A1PA6795UKMFR9", "amazon.ca (CA)": "A2EUQ1WTGCTBG2",
-           "amazon.in (IN)": "A21TJRUUN4KGV"}
-
-def _get(url, timeout=6):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8", "replace"))
-
-def _google(seed):
-    d = _get("https://suggestqueries.google.com/complete/search?client=firefox&q="
-             + urllib.parse.quote(seed))
-    return [str(x) for x in d[1]] if isinstance(d, list) and len(d) > 1 else []
-
-def _amazon(seed, mid):
-    d = _get("https://completion.amazon.com/api/2017/suggestions?mid=" + mid
-             + "&alias=aps&limit=11&prefix=" + urllib.parse.quote(seed))
-    return [s.get("value", "") for s in d.get("suggestions", []) if s.get("value")] \
-        if isinstance(d, dict) else []
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch(seed, source, mid, expand):
-    seed = C.ws(seed)
-    if not seed: return [], "Enter a seed keyword."
-    seeds = [seed] + ([f"{seed} {c}" for c in "abcdefghijklmnopqrstuvwxyz"] if expand else [])
-    fn = (lambda s: _google(s)) if source == "Google" else (lambda s: _amazon(s, mid))
-    rank, freq, disp, errs = {}, {}, {}, []
-    def safe(s):
-        try: return fn(s)
-        except Exception as e: errs.append(str(e)); return []
-    try:
-        with ThreadPoolExecutor(max_workers=8) as p:
-            for got in p.map(safe, seeds):
-                for i, term in enumerate(got):
-                    t = C.ws(term); k = t.lower()
-                    if not t: continue
-                    disp.setdefault(k, t); freq[k] = freq.get(k, 0) + 1
-                    rank[k] = min(rank.get(k, 99), i)
-    except Exception as e:
-        return [], f"Could not reach {source}: {e}"
-    if not disp:
-        return [], "Could not reach suggestion engine."
-    rows = [{"term": disp[k], "rank": rank[k], "freq": freq[k],
-             "score": C.kw_score(rank[k], freq[k], source)} for k in disp]
-    rows.sort(key=lambda r: (-r["score"], r["rank"]))
-    return rows, ""
-
-with tabs[4]:
-    st.markdown("### Find keywords")
-    k1, k2, k3 = st.columns([2, 1, 1])
-    with k1:
-        st.markdown('<div class="lbl"><b>Seed keyword</b></div>', unsafe_allow_html=True)
-        seed = st.text_input("sd", key="k_seed", label_visibility="collapsed",
-                             placeholder="kids scooter helmet")
-    with k2:
-        st.markdown('<div class="lbl"><b>Source</b></div>', unsafe_allow_html=True)
-        src = st.selectbox("sr", ["Amazon", "Google"], label_visibility="collapsed")
-    with k3:
-        st.markdown('<div class="lbl"><b>Marketplace</b></div>', unsafe_allow_html=True)
-        mkt = st.selectbox("mk", list(MARKETS), label_visibility="collapsed",
-                           disabled=(src != "Amazon"))
-    expand = st.checkbox("Expand A to Z for long-tail terms", value=False)
-    if st.button("Fetch keywords", type="primary", key="k_go"):
-        with st.spinner(f"Asking {src}…"):
-            rows, err = fetch(seed, src, MARKETS[mkt], expand)
-        st.session_state["k_rows"], st.session_state["k_err"] = rows, err
-        st.session_state["k_t"] = [r["term"] for r in rows if r["score"] >= 70][:4]
-        st.session_state["k_b"] = [r["term"] for r in rows if 45 <= r["score"] < 70][:6]
-        st.session_state["k_s"] = [r["term"] for r in rows if r["score"] < 45][:25]
-
-    if st.session_state.get("k_err"): st.warning(st.session_state["k_err"])
-    rows = st.session_state.get("k_rows", [])
-
-    if rows:
-        st.markdown("".join(
-            f'<span class="chip" style="background:{C.volume_colour(r["score"])[0]};'
-            f'color:{C.volume_colour(r["score"])[1]};border-color:{C.volume_colour(r["score"])[2]}">'
-            f'{C.esc(r["term"])} <b>{r["score"]}</b></span>' for r in rows[:110]),
-            unsafe_allow_html=True)
-
-    st.markdown("### Send each keyword where it belongs")
-    manual = st.text_area("mn", key="k_man", height=90, label_visibility="collapsed")
-    pool = list(dict.fromkeys([r["term"] for r in rows] + C.parse_lines(manual)
-                              + st.session_state.get("k_t", []) + st.session_state.get("k_b", [])
-                              + st.session_state.get("k_s", [])))
-    a1_, a2_, a3_ = st.columns(3)
-    with a1_:
-        sel_t = st.multiselect("Into title", pool, key="k_t", label_visibility="collapsed")
-    with a2_:
-        sel_b = st.multiselect("Into bullets", pool, key="k_b", label_visibility="collapsed")
-    with a3_:
-        sel_s = st.multiselect("Into search terms", pool, key="k_s", label_visibility="collapsed")
-
-    L = st.session_state.get("listing")
-    if not L:
-        st.info("Build or improve a listing first — it lands here automatically.")
-    else:
-        nt, alr, add, fail = C.force_into_title(L["title"], sel_t, L["brand"], lim, media)
-        nb, balr, badd, bfail = C.force_into_bullets(L["bullets"], sel_b,
-                                                     pool=L.get("features"), max_bullets=maxb)
-        back = C.build_backend(sel_s, exclude_text=f'{nt} {L["high"]} {" ".join(nb)}',
-                               brand=L["brand"])
-        au = [C.audit_title(nt, L["brand"], media), C.audit_highlights(L["high"])]
-        au += [C.audit_bullet(b, i + 1) for i, b in enumerate(nb)]
-        au += [C.audit_bullets_total(nb), C.audit_backend(back["terms"])]
-        st.markdown("---")
-        scorecard(au)
-        copy_out(nt, L["high"], nb, back["terms"], key="k")
-
-# ================================================================ RULES
-with tabs[5]:
-    st.markdown("### The rules this tool enforces")
-    st.markdown(f"""
-**Title — {C.TITLE_LIMIT} characters**
-`[Brand] + [Attribute 1] + [Product Type], [Attribute 2], [Size]`
-Commas separate rather than brackets. Units are abbreviated (oz, lb, ct).
-
-**Item Highlights — {C.HIGHLIGHT_LIMIT} characters**
-`[Primary material or spec] ; [core differentiator or use case]`
-
-**Bullets — {C.BULLET_MIN} to {C.BULLET_MAX} characters each**
-`[ALL CAPS HEADER]: [benefit-first statement]; [supporting feature detail]`
-
-**Backend search terms — {C.BACKEND_BYTES} bytes**
-Unique single words, all lowercase, single spaces. Max 249 bytes.
-""")
