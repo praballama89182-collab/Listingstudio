@@ -132,6 +132,13 @@ def copy_raw(pairs, key="r"):
                 label(name, C.clen(val), None)
                 st.code(val, language=None)
 
+def _get_field(obj, key, default=""):
+    if not obj:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
 # --------------------------------------------------------------- sidebar
 with st.sidebar:
     st.subheader("Settings")
@@ -166,30 +173,33 @@ with tabs[0]:
         st.markdown('<div class="lbl"><b>2 · Model Name</b></div>', unsafe_allow_html=True)
         model_name = st.text_input("mo", key="f_model", label_visibility="collapsed", placeholder="AeroX 500")
     with r1c3:
-        st.markdown('<div class="lbl"><b>3 · Attribute 1</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>3 · Attribute 1 — the strongest qualifier</b></div>', unsafe_allow_html=True)
         a1 = st.text_input("a1", key="f_a1", label_visibility="collapsed", placeholder="Real Carbon Fibre")
     with r1c4:
-        st.markdown('<div class="lbl"><b>4 · Attribute 2</b></div>', unsafe_allow_html=True)
-        a2 = st.text_input("a2", key="f_a2", label_visibility="collapsed", placeholder="Dual Visor")
+        st.markdown('<div class="lbl"><b>4 · Product type</b></div>', unsafe_allow_html=True)
+        ptype = st.text_input("pt", key="f_type", label_visibility="collapsed", placeholder="Modular Motorcycle Helmet")
 
     r2c1, r2c2, r2c3 = st.columns(3)
     with r2c1:
-        st.markdown('<div class="lbl"><b>5 · Product Type</b></div>', unsafe_allow_html=True)
-        ptype = st.text_input("pt", key="f_type", label_visibility="collapsed", placeholder="Modular Motorcycle Helmet")
-    with r2c2:
-        st.markdown('<div class="lbl"><b>6 · USP</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>5 · USP</b></div>', unsafe_allow_html=True)
         usp = st.text_input("up", key="f_usp", label_visibility="collapsed", placeholder="1.48 kg Lightweight")
-    with r2c3:
-        st.markdown('<div class="lbl"><b>7 · Size or Gender</b></div>', unsafe_allow_html=True)
+    with r2c2:
+        st.markdown('<div class="lbl"><b>6 · Size or gender</b></div>', unsafe_allow_html=True)
         size = st.text_input("sz", key="f_size", label_visibility="collapsed", placeholder="Medium, 500 ML or Men's")
+    with r2c3:
+        st.markdown('<div class="lbl"><b>7 · Attribute 2</b></div>', unsafe_allow_html=True)
+        a2 = st.text_input("a2", key="f_a2", label_visibility="collapsed", placeholder="Dual Visor")
 
     r3c1, r3c2 = st.columns(2)
     with r3c1:
-        st.markdown('<div class="lbl"><b>8 · Attribute 3 (Highlight Focus)</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>8 · Attribute 3</b></div>', unsafe_allow_html=True)
         a3 = st.text_input("a3", key="f_a3", label_visibility="collapsed", placeholder="DOT and ECE Certified")
     with r3c2:
-        st.markdown('<div class="lbl"><b>9 · Attribute 4 (Highlight Focus)</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>9 · Attribute 4</b></div>', unsafe_allow_html=True)
         a4 = st.text_input("a4", key="f_a4", label_visibility="collapsed", placeholder="Flip Up Chin Bar")
+
+    st.markdown('<div class="lbl"><b>Used for</b></div>', unsafe_allow_html=True)
+    used_for = st.text_input("uf", key="f_use", label_visibility="collapsed", placeholder="for touring and daily commuting")
 
     st.markdown('<div class="lbl"><b>Features — one per line</b></div>', unsafe_allow_html=True)
     feat_raw = st.text_area("ft", key="f_feat", height=140, label_visibility="collapsed",
@@ -198,11 +208,13 @@ with tabs[0]:
     st.button("Clear all boxes", key="f_clear", on_click=clear_build)
 
     feats, fmode = C.parse_bullets(feat_raw, maxb)
+    if C.ws(used_for):
+        feats.append(f"Used for: {used_for}")
 
     if C.ws(brand) and C.ws(ptype):
         facts = C.Facts(
             brand=brand, 
-            model_name=model_name, 
+            model_name=model_name,
             product_type=ptype, 
             attr1=a1, 
             attr2=a2, 
@@ -240,73 +252,88 @@ with tabs[0]:
 # ================================================================ IMPROVE (Tab 1)
 with tabs[1]:
     st.markdown("### Paste your current listing")
-    st.caption("Attribute 1 & Attribute 2 are prioritized in the title after Model Name. "
-               "Overflow parts from Title cascade into Highlights, and rest into Bullets without word duplication.")
+    st.caption("Enter product details along with your current title and bullets to optimize using 2026 rules.")
 
     def clear_imp():
-        for k in ("i_brand","i_model","i_title","i_bul","i_a1","i_a2","i_a3","i_a4","i_size","i_gender"):
+        for k in ("i_brand","i_model","i_title","i_bul","i_a1","i_a2","i_a3","i_a4","i_usp","i_size","i_type","i_use"):
             if k in st.session_state:
                 st.session_state[k] = ""
 
-    ic1, ic2, ic3 = st.columns([1, 1, 2])
+    # Row 1: Brand, Model Name, Attribute 1, Product Type
+    ic1, ic2, ic3, ic4 = st.columns(4)
     with ic1:
-        st.markdown('<div class="lbl"><b>Brand name</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>1 · Brand name</b></div>', unsafe_allow_html=True)
         ibrand = st.text_input("ib", key="i_brand", label_visibility="collapsed", placeholder="Rider")
     with ic2:
-        st.markdown('<div class="lbl"><b>Model Name</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>2 · Model Name</b></div>', unsafe_allow_html=True)
         imodel = st.text_input("imo", key="i_model", label_visibility="collapsed", placeholder="AeroX 500")
     with ic3:
-        st.markdown('<div class="lbl"><b>Current title</b></div>', unsafe_allow_html=True)
-        iraw = st.text_area("it", key="i_title", height=80, label_visibility="collapsed",
-                            placeholder="Rider ABS Scooter Helmet for Kids | 11 Vents | Pack of 2")
+        st.markdown('<div class="lbl"><b>3 · Attribute 1 — the strongest qualifier</b></div>', unsafe_allow_html=True)
+        ia1 = st.text_input("ia1", key="i_a1", label_visibility="collapsed", placeholder="Real Carbon Fibre")
+    with ic4:
+        st.markdown('<div class="lbl"><b>4 · Product type</b></div>', unsafe_allow_html=True)
+        iptype = st.text_input("ipt", key="i_type", label_visibility="collapsed", placeholder="Modular Motorcycle Helmet")
+
+    # Row 2: USP, Size/Gender, Attribute 2
+    jc1, jc2, jc3 = st.columns(3)
+    with jc1:
+        st.markdown('<div class="lbl"><b>5 · USP</b></div>', unsafe_allow_html=True)
+        iusp = st.text_input("iup", key="i_usp", label_visibility="collapsed", placeholder="1.48 kg Lightweight")
+    with jc2:
+        st.markdown('<div class="lbl"><b>6 · Size or gender</b></div>', unsafe_allow_html=True)
+        isize = st.text_input("isz", key="i_size", label_visibility="collapsed", placeholder="Medium, 500 ML or Men's")
+    with jc3:
+        st.markdown('<div class="lbl"><b>7 · Attribute 2</b></div>', unsafe_allow_html=True)
+        ia2 = st.text_input("ia2", key="i_a2", label_visibility="collapsed", placeholder="Dual Visor")
+
+    # Row 3: Attribute 3, Attribute 4
+    hc1, hc2 = st.columns(2)
+    with hc1:
+        st.markdown('<div class="lbl"><b>8 · Attribute 3</b></div>', unsafe_allow_html=True)
+        ia3 = st.text_input("ia3", key="i_a3", label_visibility="collapsed", placeholder="DOT and ECE Certified")
+    with hc2:
+        st.markdown('<div class="lbl"><b>9 · Attribute 4</b></div>', unsafe_allow_html=True)
+        ia4 = st.text_input("ia4", key="i_a4", label_visibility="collapsed", placeholder="Flip Up Chin Bar")
+
+    # Used for
+    st.markdown('<div class="lbl"><b>Used for</b></div>', unsafe_allow_html=True)
+    iused_for = st.text_input("iuf", key="i_use", label_visibility="collapsed", placeholder="for touring and daily commuting")
+
+    st.markdown('<div class="lbl"><b>Current title</b></div>', unsafe_allow_html=True)
+    iraw = st.text_area("it", key="i_title", height=80, label_visibility="collapsed",
+                        placeholder="Rider ABS Scooter Helmet for Kids | 11 Vents | Pack of 2")
     if iraw:
         label("Length of what you pasted", C.clen(iraw), lim)
 
     mined = C.mine_title(iraw, ibrand) if C.ws(iraw) else None
-
-    # Row 1: Title Priority
-    jc1, jc2, jc3, jc4 = st.columns(4)
-    with jc1:
-        st.markdown('<div class="lbl"><b>Attribute 1 (Priority 1)</b></div>', unsafe_allow_html=True)
-        ia1 = st.text_input("ia1", key="i_a1", label_visibility="collapsed", placeholder="ABS Shell")
-    with jc2:
-        st.markdown('<div class="lbl"><b>Attribute 2 (Priority 2)</b></div>', unsafe_allow_html=True)
-        ia2 = st.text_input("ia2", key="i_a2", label_visibility="collapsed", placeholder="Matte Black")
-    with jc3:
-        st.markdown('<div class="lbl"><b>Size (Tail)</b></div>', unsafe_allow_html=True)
-        isize = st.text_input("isz", key="i_size", label_visibility="collapsed", placeholder="Medium")
-    with jc4:
-        st.markdown('<div class="lbl"><b>Gender (Last Priority)</b></div>', unsafe_allow_html=True)
-        igender = st.text_input("ign", key="i_gender", label_visibility="collapsed", placeholder="Kids / Unisex")
-
-    # Row 2: Highlights Priority
-    hc1, hc2 = st.columns(2)
-    with hc1:
-        st.markdown('<div class="lbl"><b>Attribute 3 (Highlight Focus)</b></div>', unsafe_allow_html=True)
-        ia3 = st.text_input("ia3", key="i_a3", label_visibility="collapsed", placeholder="CPSC & DOT Certified")
-    with hc2:
-        st.markdown('<div class="lbl"><b>Attribute 4 (Highlight Focus)</b></div>', unsafe_allow_html=True)
-        ia4 = st.text_input("ia4", key="i_a4", label_visibility="collapsed", placeholder="11 Air Vents Ventilation")
 
     st.markdown('<div class="lbl"><b>Current bullets — one per line</b></div>', unsafe_allow_html=True)
     ibul = st.text_area("ibl", key="i_bul", height=150, label_visibility="collapsed", placeholder="Vented shell\nAdjustable dial fit")
     st.button("Clear all boxes", key="i_clear", on_click=clear_imp)
 
     if mined and C.ws(iraw):
-        tail_spec = ", ".join([x for x in [isize or mined["size"], igender] if C.ws(x)])
+        mined_features = _get_field(mined, "features", [])
+        mined_type = _get_field(mined, "product_type", "")
+        mined_size = _get_field(mined, "size", "")
+
+        all_feats = C.parse_lines(ibul) or mined_features
+        if C.ws(iused_for):
+            all_feats.append(f"Used for: {iused_for}")
+
         facts = C.Facts(
             brand=ibrand,
             model_name=imodel,
-            product_type=mined["product_type"],
-            attr1=ia1 or (mined["features"][0] if mined["features"] else ""),
-            attr2=ia2 or (mined["features"][1] if len(mined["features"]) > 1 else ""),
+            product_type=iptype or mined_type,
+            attr1=ia1 or (mined_features[0] if len(mined_features) > 0 else ""),
+            attr2=ia2 or (mined_features[1] if len(mined_features) > 1 else ""),
             attr3=ia3,
             attr4=ia4,
-            size_gender=tail_spec,
-            features=mined["features"]
+            usp=iusp,
+            size_gender=isize or mined_size,
+            features=all_feats
         )
 
-        _res = C.compose(facts, media, extra=mined["features"], max_bullets=maxb)
+        _res = C.compose(facts, media, extra=mined_features, max_bullets=maxb)
         title, high, bullets = _res["title"], _res["highlights"], _res["bullets"]
 
         au = [C.audit_title(title, ibrand, media), C.audit_highlights(high)]
@@ -316,7 +343,7 @@ with tabs[1]:
         st.markdown("---")
         scorecard(au)
         copy_out(title, high, bullets, key="i")
-        st.session_state["listing"] = {"title": title, "high": high, "bullets": bullets, "brand": ibrand, "features": mined["features"]}
+        st.session_state["listing"] = {"title": title, "high": high, "bullets": bullets, "brand": ibrand, "features": mined_features}
 
 # ================================================================ KEYWORDS & BACKEND (Tab 2)
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
