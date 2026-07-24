@@ -1,7 +1,3 @@
-"""
-Listing Studio — Amazon title, item highlights, bullets and search terms (2026 rules).
-Rules engine lives in core.py. This file is presentation only.
-"""
 import json, re, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
@@ -204,8 +200,18 @@ with tabs[0]:
     feats, fmode = C.parse_bullets(feat_raw, maxb)
 
     if C.ws(brand) and C.ws(ptype):
-        facts = C.Facts(brand=brand, model_name=model_name, product_type=ptype, attr1=a1, attr2=a2, attr3=a3, attr4=a4,
-                        usp=usp, size_gender=size, features=feats)
+        facts = C.Facts(
+            brand=brand, 
+            model_name=model_name, 
+            product_type=ptype, 
+            attr1=a1, 
+            attr2=a2, 
+            attr3=a3, 
+            attr4=a4,
+            usp=usp, 
+            size_gender=size, 
+            features=feats
+        )
         res = C.compose(facts, media, max_bullets=maxb)
         title, high, bullets = res["title"], res["highlights"], res["bullets"]
 
