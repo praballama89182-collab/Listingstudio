@@ -10,7 +10,10 @@ import core as C
 import images as IMG
 from PIL import Image
 
-st.set_page_config(page_title="Listing Studio", page_icon="🛍️", layout="wide")
+# Custom Embedded Tab Icon (Studio Sparkle + Edit Pencil SVG)
+FAVICON = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' rx='32' fill='%237B6CFF'/><path d='M36 92 L80 48 L92 60 L48 104 L28 104 Z' fill='%23FFFFFF'/><path d='M80 32 L96 48' stroke='%23FFE29A' stroke-width='8'/></svg>"
+
+st.set_page_config(page_title="Listing Studio", page_icon=FAVICON, layout="wide")
 
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Archivo:wght@600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
@@ -145,7 +148,7 @@ with st.sidebar:
     st.caption("**Field limits**  \nTitle 75 · Highlights 125 · Bullets 150–200 each, "
                "1000 total · Search terms 249 bytes")
 
-# Tabs placed in precise sequence
+# Tabs placed in requested sequence
 tabs = st.tabs(["Build a listing", "Improve a listing", "Keyword research", "Rules", "Listing images", "AI generation"])
 
 # ================================================================ BUILD (Tab 0)
@@ -392,14 +395,14 @@ with tabs[2]:
     L = st.session_state.get("listing", {})
     all_selected = list(dict.fromkeys(sel_t + sel_b + sel_s))
 
-    # Dynamic Unique Terms Extraction
+    # Dynamic Unique Terms Extraction Engine
     computed_backend = C.build_backend(
         all_selected, 
         exclude_text=f"{L.get('title', '')} {L.get('high', '')}", 
         brand=L.get('brand', '')
     )["terms"]
 
-    # Safely handle session state for editable output
+    # Pre-update session state safely before rendering text_area
     if st.session_state.get("last_auto_backend") != computed_backend:
         st.session_state["backend_edit"] = computed_backend
         st.session_state["last_auto_backend"] = computed_backend
