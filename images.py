@@ -4,10 +4,6 @@ Listing image builder — Amazon 2026 image rules.
 Main image rules enforced here: pure white RGB(255,255,255), product fills ~85%
 of the frame, no text or graphics, square, 2000 px, sRGB JPEG under 10 MB.
 Secondary slots allow text, infographics and lifestyle backgrounds.
-
-Honest scope: this composites YOUR product photo onto generated backgrounds and
-lays type over it. It does not invent photographic scenery — for a lifestyle
-shot you supply the background photo and the product is placed onto it.
 """
 from __future__ import annotations
 import io, os, re, zipfile
@@ -50,9 +46,8 @@ def to_rgb(im):
     return im.convert("RGB")
 
 def cutout(im, tol=18):
-    """Returns (RGBA product with background removed, bbox). Works on the
-    studio-white shots sellers already have; flood-fills from the corners so a
-    light grey studio sweep is removed too."""
+    """Returns (RGBA product with background removed, bbox). Removes white/grey studio
+    backgrounds cleanly while preserving dark products."""
     im = to_rgb(im)
     w, h = im.size
     px = im.load()
@@ -73,7 +68,8 @@ def fit(im, box_w, box_h):
     return im.resize((max(1, int(im.width * r)), max(1, int(im.height * r))), Image.LANCZOS)
 
 def wrap(draw, text, font, max_w):
-    words, lines, cur = text.split(), [], ""
+    """Splits long attributes/headings into 2-3 structured lines."""
+    words, lines, cur = (text or "").split(), [], ""
     for w in words:
         t = f"{cur} {w}".strip()
         if draw.textlength(t, font=font) <= max_w or not cur:
@@ -83,23 +79,25 @@ def wrap(draw, text, font, max_w):
     if cur: lines.append(cur)
     return lines
 
-def draw_lines(draw, xy, lines, font, fill, leading=1.06):
+def draw_lines_with_shadow(draw, xy, lines, font, fill, shadow_fill=(10, 10, 10, 200), leading=1.1, shadow_offset=3):
+    """Draws multi-line text with an active drop shadow to keep high contrast over any background."""
     x, y = xy
     asc = font.getbbox("Hg")[3] - font.getbbox("Hg")[1]
     for ln in lines:
+        # Drop shadow for readability
+        if shadow_fill:
+            draw.text((x + shadow_offset, y + shadow_offset), ln, font=font, fill=shadow_fill)
         draw.text((x, y), ln, font=font, fill=fill)
-        y += int(asc * leading) + 6
+        y += int(asc * leading) + 8
     return y
 
 def hex_pattern(canvas, colour=(255, 255, 255), alpha=16, step=120):
-    """Faint hexagon texture, the motif used across the reference set."""
     lay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(lay)
     r = step * 0.45
     for row, y in enumerate(range(-step, canvas.height + step, int(step * 0.86))):
         for x in range(-step, canvas.width + step, step):
             cx = x + (step // 2 if row % 2 else 0)
-            pts = [(cx + r * (0.5 if i % 3 else 1) * (1 if i < 3 else -1), y) for i in range(1)]
             pts = [(cx + r * __import__("math").cos(__import__("math").radians(60 * i)),
                     y + r * __import__("math").sin(__import__("math").radians(60 * i)))
                    for i in range(6)]
@@ -124,7 +122,7 @@ def shadow(canvas, prod, pos, blur=42, opacity=110):
     sh = sh.filter(ImageFilter.GaussianBlur(blur))
     return Image.alpha_composite(canvas.convert("RGBA"), sh).convert("RGB")
 
-def red_rule(d, x, y, w=180, h=10):
+def red_rule(d, x, y, w=220, h=12):
     d.rectangle([x, y, x + w, y + h], fill=RED)
 
 # ------------------------------------------------------------------ templates
@@ -138,7 +136,6 @@ def main_image(src, size=CANVAS, fill=MAIN_FILL):
     pos = ((size - prod.width) // 2, (size - prod.height) // 2)
     canvas = shadow(canvas, prod, pos, blur=30, opacity=55)
     canvas.paste(prod, pos, prod)
-    # guarantee the corners read as exactly 255,255,255
     d = ImageDraw.Draw(canvas)
     m = int(size * 0.012)
     for box in [(0, 0, size, m), (0, size - m, size, size),
@@ -147,122 +144,160 @@ def main_image(src, size=CANVAS, fill=MAIN_FILL):
     return canvas
 
 def hero(src, headline, accent, subline="", size=CANVAS, bg=None):
-    """Headline top-left in two colours, product right. Slots 2-3."""
+    """Proportional multi-line headline with dynamic contrast overlay."""
     if bg is not None:
         canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
-        veil = Image.new("RGBA", (size, size), (10, 10, 12, 120))
+        # Dark translucent overlay to guarantee text readability on bright/noisy photos
+        veil = Image.new("RGBA", (size, size), (15, 17, 23, 150))
         canvas = Image.alpha_composite(canvas.convert("RGBA"), veil).convert("RGB")
     else:
         canvas = gradient((size, size), (44, 47, 54), (12, 13, 15))
         canvas = hex_pattern(canvas, alpha=13)
+
+    # Product Cutout Scaling
     prod, bbox = cutout(src); prod = prod.crop(bbox)
-    prod = fit(prod, int(size * .62), int(size * .58))
-    pos = (size - prod.width - int(size * .05), int(size * .38))
+    prod = fit(prod, int(size * 0.58), int(size * 0.62))
+    pos = (size - prod.width - int(size * .04), int(size * .32))
     canvas = shadow(canvas, prod, pos, blur=55, opacity=140)
     canvas.paste(prod, pos, prod)
 
+    # Text Block Container (High Contrast Card)
     d = ImageDraw.Draw(canvas)
-    m = int(size * .06)
-    f1 = display(int(size * .085))
-    y = m
-    y = draw_lines(d, (m, y), wrap(d, headline.upper(), f1, size * .62), f1, WHITE)
-    y = draw_lines(d, (m, y), wrap(d, accent.upper(), f1, size * .62), f1, RED)
-    red_rule(d, m, y + 14, int(size * .11), int(size * .006))
+    m = int(size * .05)
+    f1 = display(int(size * .095))      # Larger headline font
+    fb = body_b(int(size * .032))      # Larger subline font
+
+    # Draw semi-transparent card under text area so text stands out completely
+    card_w = int(size * 0.54)
+    card_overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(card_overlay)
+    cd.rounded_rectangle([m - 15, m - 15, m + card_w, int(size * 0.88)], radius=24, fill=(10, 12, 18, 170))
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), card_overlay).convert("RGB")
+    d = ImageDraw.Draw(canvas)
+
+    y = m + 10
+    if headline:
+        hl_lines = wrap(d, headline.upper(), f1, card_w - 30)
+        y = draw_lines_with_shadow(d, (m, y), hl_lines, f1, WHITE)
+
+    if accent:
+        acc_lines = wrap(d, accent.upper(), f1, card_w - 30)
+        y = draw_lines_with_shadow(d, (m, y), acc_lines, f1, RED)
+
+    red_rule(d, m, y + 10, int(size * .14), int(size * .008))
+    y += int(size * .04)
+
     if subline:
-        fb = body(int(size * .028))
-        draw_lines(d, (m, y + int(size * .05)), wrap(d, subline, fb, size * .48), fb, (232, 234, 238), 1.35)
+        sub_lines = wrap(d, subline, fb, card_w - 30)
+        draw_lines_with_shadow(d, (m, y), sub_lines, fb, GREY, shadow_fill=(0,0,0,220), leading=1.3)
+
     return canvas
 
 def badge_card(src, headline, accent, badges, size=CANVAS, bg=None):
-    """Top bar headline, badge stack on the left, product right. Slot 4-5."""
+    """Top bar headline with vertical high-contrast attribute cards."""
     if bg is not None:
         canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
+        veil = Image.new("RGBA", (size, size), (15, 17, 23, 110))
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), veil).convert("RGB")
     else:
         canvas = gradient((size, size), (238, 240, 244), (203, 208, 215))
+
     d = ImageDraw.Draw(canvas)
-    bar = int(size * .155)
+    bar = int(size * .16)
     d.rectangle([0, 0, size, bar], fill=BLACK)
     d.polygon([(int(size * .62), bar), (size, bar), (size, bar + int(size * .028))], fill=RED)
 
     prod, bbox = cutout(src); prod = prod.crop(bbox)
-    prod = fit(prod, int(size * .62), int(size * .55))
-    pos = (size - prod.width - int(size * .04), int(size * .40))
+    prod = fit(prod, int(size * .58), int(size * .58))
+    pos = (size - prod.width - int(size * .04), int(size * .35))
     canvas = shadow(canvas, prod, pos, blur=50, opacity=120)
     canvas.paste(prod, pos, prod)
 
     d = ImageDraw.Draw(canvas)
     m = int(size * .045)
-    f1 = display(int(size * .058))
+    f1 = display(int(size * .065))
     lines = wrap(d, headline.upper(), f1, size * .78)
     yy = int(bar * .18)
+
     for ln in lines[:1]:
         d.text((m, yy), ln, font=f1, fill=WHITE)
         wln = d.textlength(ln, font=f1)
         if accent: d.text((m + wln + 18, yy), accent.upper(), font=f1, fill=RED)
-    fb = body(int(size * .026))
-    d.text((m, int(bar * .66)), " ", font=fb, fill=WHITE)
 
-    y = int(size * .27)
+    y = int(size * .22)
     for label, sub in badges[:4]:
-        h = int(size * .085)
-        d.rounded_rectangle([m, y, m + int(size * .40), y + h], radius=int(h * .18), fill=BLACK)
-        d.rectangle([m + int(size * .40) - 8, y, m + int(size * .40), y + h], fill=RED)
-        d.text((m + int(size * .035), y + int(h * .16)), label.upper(),
-               font=cond(int(size * .035)), fill=WHITE)
+        h = int(size * .11)
+        d.rounded_rectangle([m, y, m + int(size * .44), y + h], radius=int(h * .18), fill=DARK)
+        d.rectangle([m + int(size * .44) - 10, y, m + int(size * .44), y + h], fill=RED)
+        
+        lbl_lines = wrap(d, label.upper(), cond(int(size * .038)), int(size * .38))
+        d.text((m + int(size * .035), y + int(h * .12)), "\n".join(lbl_lines),
+               font=cond(int(size * .038)), fill=WHITE)
         if sub:
-            d.text((m + int(size * .035), y + int(h * .58)), sub,
-                   font=body(int(size * .018)), fill=(190, 194, 200))
-        y += h + int(size * .028)
+            sub_lines = wrap(d, sub, body(int(size * .021)), int(size * .38))
+            d.text((m + int(size * .035), y + int(h * .54)), "\n".join(sub_lines[:2]),
+                   font=body(int(size * .021)), fill=(210, 214, 222))
+        y += h + int(size * .025)
     return canvas
 
 def callouts(src, items, headline="", size=CANVAS):
-    """Product centred with feature callouts down both sides. Slot 6-7."""
+    """Product centered with feature callout cards split onto both sides."""
     canvas = gradient((size, size), (243, 244, 246), (214, 217, 222))
     prod, bbox = cutout(src); prod = prod.crop(bbox)
-    prod = fit(prod, int(size * .46), int(size * .46))
+    prod = fit(prod, int(size * .48), int(size * .48))
     pos = ((size - prod.width) // 2, (size - prod.height) // 2 + int(size * .03))
     canvas = shadow(canvas, prod, pos, blur=45, opacity=110)
     canvas.paste(prod, pos, prod)
+
     d = ImageDraw.Draw(canvas)
     if headline:
-        f1 = display(int(size * .05))
-        d.text((int(size * .05), int(size * .045)), headline.upper(), font=f1, fill=BLACK)
-        red_rule(d, int(size * .05), int(size * .045) + int(size * .062), int(size * .09), 8)
+        f1 = display(int(size * .06))
+        d.text((int(size * .05), int(size * .04)), headline.upper(), font=f1, fill=BLACK)
+        red_rule(d, int(size * .05), int(size * .04) + int(size * .075), int(size * .12), 10)
 
     left = [i for n, i in enumerate(items) if n % 2 == 0][:3]
     right = [i for n, i in enumerate(items) if n % 2 == 1][:3]
-    fh, fb = cond(int(size * .033)), body(int(size * .0195))
+    fh, fb = cond(int(size * .036)), body(int(size * .022))
+
     for col, side in ((left, "l"), (right, "r")):
-        y = int(size * .21)
+        y = int(size * .20)
         for title, sub in col:
-            x = int(size * .045) if side == "l" else int(size * .60)
+            x = int(size * .04) if side == "l" else int(size * .62)
             w = int(size * .34)
+
+            # Card background behind feature text for clarity
+            d.rounded_rectangle([x - 10, y - 8, x + w + 10, y + int(size * .20)], radius=12,
+                                fill=(255, 255, 255, 220), outline=(200, 204, 210), width=2)
             d.text((x, y), title.upper(), font=fh, fill=RED)
-            ly = y + int(size * .042)
-            for ln in wrap(d, sub, fb, w)[:3]:
-                d.text((x, ly), ln, font=fb, fill=(48, 52, 60)); ly += int(size * .026)
+            ly = y + int(size * .045)
+            
+            sub_lines = wrap(d, sub, fb, w - 10)
+            for ln in sub_lines[:3]:
+                d.text((x, ly), ln, font=fb, fill=(30, 32, 38)); ly += int(size * .028)
+            
             ax = x + w if side == "l" else x
             d.line([(ax, y + int(size * .02)),
-                    (size // 2 - (int(size * .17) if side == "l" else -int(size * .17)),
+                    (size // 2 - (int(size * .18) if side == "l" else -int(size * .18)),
                      y + int(size * .02))], fill=(150, 155, 163), width=3)
             d.ellipse([ax - 9, y + int(size * .02) - 9, ax + 9, y + int(size * .02) + 9], fill=RED)
-            y += int(size * .245)
+            y += int(size * .24)
     return canvas
 
 def angle_grid(images, labels=None, headline="360 view", accent="every angle covered", size=CANVAS):
-    """Four-up grid of angles. Great when several studio shots already exist."""
+    """Four-up grid of product angles with readable text tabs."""
     canvas = gradient((size, size), (245, 246, 248), (223, 226, 231))
     d = ImageDraw.Draw(canvas)
-    f1 = display(int(size * .052))
+    f1 = display(int(size * .06))
     m = int(size * .045)
     d.text((m, int(size * .04)), headline.upper(), font=f1, fill=BLACK)
     wln = d.textlength(headline.upper(), font=f1)
     d.text((m + wln + 16, int(size * .04)), accent.upper(), font=f1, fill=RED)
-    red_rule(d, m, int(size * .04) + int(size * .066), int(size * .10), 8)
+    red_rule(d, m, int(size * .04) + int(size * .075), int(size * .12), 10)
 
     top = int(size * .18)
     cell = (size - m * 2 - int(size * .02)) // 2
     labels = labels or ["Front view", "Side view", "Top view", "Angled view"]
+
     for i, im in enumerate(images[:4]):
         cx = m + (i % 2) * (cell + int(size * .02))
         cy = top + (i // 2) * (cell + int(size * .02))
@@ -274,22 +309,77 @@ def angle_grid(images, labels=None, headline="360 view", accent="every angle cov
         canvas.paste(p, (px, py), p)
         d = ImageDraw.Draw(canvas)
         tag = labels[i] if i < len(labels) else ""
-        tw = d.textlength(tag.upper(), font=cond(int(size * .022)))
-        d.rectangle([cx + 16, cy + 16, cx + 40 + tw, cy + 16 + int(size * .04)], fill=BLACK)
-        d.rectangle([cx + 16, cy + 16, cx + 24, cy + 16 + int(size * .04)], fill=RED)
-        d.text((cx + 34, cy + 22), tag.upper(), font=cond(int(size * .022)), fill=WHITE)
+        tw = d.textlength(tag.upper(), font=cond(int(size * .026)))
+        d.rectangle([cx + 16, cy + 16, cx + 45 + tw, cy + 16 + int(size * .048)], fill=BLACK)
+        d.rectangle([cx + 16, cy + 16, cx + 24, cy + 16 + int(size * .048)], fill=RED)
+        d.text((cx + 34, cy + 22), tag.upper(), font=cond(int(size * .026)), fill=WHITE)
+    return canvas
+
+def spec_card(src, headline, accent, stat, stat_label, chips=None, size=CANVAS, bg=None):
+    """Large numerical statistic with dark badges for key metrics."""
+    if bg is not None:
+        canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
+        veil = Image.new("RGBA", (size, size), (245, 246, 248, 170))
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), veil).convert("RGB")
+    else:
+        canvas = gradient((size, size), (250, 250, 252), (219, 223, 229))
+
+    d = ImageDraw.Draw(canvas)
+    d.polygon([(0, 0), (int(size * .30), 0), (0, int(size * .30))], fill=BLACK)
+    d.polygon([(0, 0), (int(size * .17), 0), (0, int(size * .17))], fill=RED)
+
+    prod, bbox = cutout(src); prod = prod.crop(bbox)
+    prod = fit(prod, int(size * .55), int(size * .50))
+    pos = (size - prod.width - int(size * .05), int(size * .28))
+    canvas = shadow(canvas, prod, pos, blur=48, opacity=115)
+    canvas.paste(prod, pos, prod)
+
+    d = ImageDraw.Draw(canvas)
+    m = int(size * .055)
+    f1 = display(int(size * .07))
+    y = int(size * .10)
+    
+    if headline:
+        hl_lines = wrap(d, headline.upper(), f1, int(size * 0.52))
+        y = draw_lines_with_shadow(d, (m, y), hl_lines, f1, BLACK, shadow_fill=None)
+
+    if accent:
+        acc_lines = wrap(d, accent.upper(), f1, int(size * 0.52))
+        y = draw_lines_with_shadow(d, (m, y), acc_lines, f1, RED, shadow_fill=None)
+
+    red_rule(d, m, y + 10, int(size * .12), 10)
+
+    if stat:
+        fs = display(int(size * .16))
+        d.text((m, int(size * .44)), str(stat), font=fs, fill=BLACK)
+        w = d.textlength(str(stat), font=fs)
+        d.text((m + w + 14, int(size * .52)), stat_label or "", font=cond(int(size * .045)), fill=RED)
+
+    for i, (t, s2) in enumerate((chips or [])[:3]):
+        cw = (size - m * 2) // 3
+        x = m + i * cw
+        yy = int(size * .82)
+        d.rounded_rectangle([x, yy, x + cw - 18, yy + int(size * .12)], radius=14,
+                            fill=WHITE, outline=(214, 218, 224), width=3)
+        d.rectangle([x, yy, x + 10, yy + int(size * .12)], fill=RED)
+        
+        t_lines = wrap(d, t.upper(), cond(int(size * .03)), cw - 40)
+        d.text((x + 22, yy + int(size * .015)), "\n".join(t_lines[:2]), font=cond(int(size * .03)), fill=BLACK)
+        if s2:
+            s2_lines = wrap(d, s2, body(int(size * .02)), cw - 40)
+            d.text((x + 22, yy + int(size * .065)), "\n".join(s2_lines[:2]), font=body(int(size * .02)), fill=(90, 96, 106))
     return canvas
 
 # ------------------------------------------------------------------ compliance
 def audit_image(im, is_main=False):
-    """Checks an image against Amazon's published rules."""
+    """Checks an image against Amazon's published standards."""
     out = []
     w, h = im.size
     longest = max(w, h)
     if longest < MIN_SIDE:
         out.append(("error", f"{w}x{h}. Under {MIN_SIDE} px on the longest side, so zoom is disabled."))
     elif longest < 1600:
-        out.append(("warn", f"{w}x{h}. Works, but 2000 px is the 2026 recommendation."))
+        out.append(("warn", f"{w}x{h}. Works, but 2000 px is recommended."))
     if longest > MAX_SIDE:
         out.append(("error", f"Longest side {longest} px exceeds the {MAX_SIDE} px maximum."))
     if max(w, h) / max(1, min(w, h)) > 5:
@@ -301,21 +391,18 @@ def audit_image(im, is_main=False):
                (w // 2, 0), (w // 2, h - 1), (0, h // 2), (w - 1, h // 2)]
         bad = [p for p in pts if px[p] != (255, 255, 255)]
         if bad:
-            out.append(("error", f"Background is not pure white at {len(bad)} of {len(pts)} sampled "
-                                 f"edge points. Amazon samples these and suppresses the listing."))
+            out.append(("error", f"Background is not pure white at {len(bad)} of {len(pts)} sampled edge points."))
         prod, bbox = cutout(rgb)
         fillpc = ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) / (w * h)
         if fillpc < 0.55:
-            out.append(("warn", f"Product occupies roughly {fillpc*100:.0f}% of the frame. "
-                                "Amazon wants 85% or more of the longest dimension filled."))
+            out.append(("warn", f"Product occupies roughly {fillpc*100:.0f}% of the frame. Amazon recommends 85%+ fill."))
         if w != h:
-            out.append(("warn", "Not square. 1:1 is the convention for the main image."))
+            out.append(("warn", "Not square. 1:1 is standard for main images."))
     if not out:
         out.append(("ok", f"{w}x{h}, compliant."))
     return out
 
 def encode(im, quality=JPEG_Q):
-    """sRGB JPEG under Amazon's 10 MB cap."""
     for q in (quality, 88, 82, 76, 70):
         buf = io.BytesIO()
         im.convert("RGB").save(buf, "JPEG", quality=q, subsampling=0, optimize=True, dpi=(72, 72))
@@ -328,7 +415,6 @@ def safe_asin(s):
     return s.upper() or "PRODUCT"
 
 def filename(asin, slot):
-    """Amazon's convention: ASIN.MAIN.jpg, ASIN.PT01.jpg — no spaces or dashes."""
     return f"{safe_asin(asin)}.MAIN.jpg" if slot == 0 else f"{safe_asin(asin)}.PT{slot:02d}.jpg"
 
 def build_zip(pairs):
@@ -338,67 +424,17 @@ def build_zip(pairs):
             z.writestr(name, data)
     return buf.getvalue()
 
-# ------------------------------------------------------------------ slot plan
 SLOT_PLAN = [
-    (0,  "Main",            "Pure white, product only, 85% fill. No text, logos or props — this is "
-                            "the one slot Amazon actively suppresses."),
-    (1,  "Hero benefit",    "The single strongest reason to buy, as a headline over the product."),
-    (2,  "Feature callouts","Exploded or annotated view naming the parts. Carries the most detail."),
-    (3,  "Certification",   "Standards, testing and compliance badges. Removes the safety objection."),
-    (4,  "Material or build","What it is made of and why that matters."),
-    (5,  "Scale or spec",   "Weight, dimensions or fit, so nobody guesses and returns it."),
-    (6,  "Lifestyle in use","The product in its real context. Needs a background photo from you."),
-    (7,  "Angle grid",      "Every angle in one frame, for shoppers who will not swipe."),
-    (8,  "What is included","Everything in the box, so expectations match delivery."),
+    (0,  "Main",            "Pure white, product only, 85% fill."),
+    (1,  "Hero benefit",    "Headline and key benefit placed over the composited product cutout."),
+    (2,  "Feature callouts","Annotated cards naming attributes and specs."),
+    (3,  "Certification",   "Standards, testing, and compliance badges."),
+    (4,  "Material or build","Materials and build highlight cards."),
+    (5,  "Scale or spec",   "Sizing and key numerical statistics."),
+    (6,  "Lifestyle in use","Product composited into a lifestyle background scene."),
+    (7,  "Angle grid",      "Four key product angles in one multi-pane view."),
+    (8,  "What is included","Box contents and bundle breakdown."),
 ]
-
-
-def spec_card(src, headline, accent, stat, stat_label, chips=None, size=CANVAS, bg=None):
-    """Big statistic left, product right, icon chips along the bottom.
-    Use for weight, capacity, dimensions — the numbers that stop returns."""
-    if bg is not None:
-        canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
-        canvas = Image.alpha_composite(canvas.convert("RGBA"),
-                                       Image.new("RGBA", (size, size), (245, 246, 248, 165))).convert("RGB")
-    else:
-        canvas = gradient((size, size), (250, 250, 252), (219, 223, 229))
-    d = ImageDraw.Draw(canvas)
-    d.polygon([(0, 0), (int(size * .30), 0), (0, int(size * .30))], fill=BLACK)
-    d.polygon([(0, 0), (int(size * .17), 0), (0, int(size * .17))], fill=RED)
-
-    prod, bbox = cutout(src); prod = prod.crop(bbox)
-    prod = fit(prod, int(size * .55), int(size * .46))
-    pos = (size - prod.width - int(size * .06), int(size * .30))
-    canvas = shadow(canvas, prod, pos, blur=48, opacity=115)
-    canvas.paste(prod, pos, prod)
-
-    d = ImageDraw.Draw(canvas)
-    m = int(size * .055)
-    f1 = display(int(size * .062))
-    y = int(size * .10)
-    y = draw_lines(d, (m, y), wrap(d, headline.upper(), f1, size * .55), f1, BLACK)
-    if accent:
-        y = draw_lines(d, (m, y), wrap(d, accent.upper(), f1, size * .55), f1, RED)
-    red_rule(d, m, y + 12, int(size * .10), 9)
-
-    if stat:
-        fs = display(int(size * .14))
-        d.text((m, int(size * .42)), str(stat), font=fs, fill=BLACK)
-        w = d.textlength(str(stat), font=fs)
-        d.text((m + w + 12, int(size * .50)), stat_label or "", font=cond(int(size * .04)), fill=RED)
-
-    for i, (t, s2) in enumerate((chips or [])[:3]):
-        cw = (size - m * 2) // 3
-        x = m + i * cw
-        yy = int(size * .84)
-        d.rounded_rectangle([x, yy, x + cw - 18, yy + int(size * .10)], radius=14,
-                            fill=WHITE, outline=(214, 218, 224), width=3)
-        d.rectangle([x, yy, x + 10, yy + int(size * .10)], fill=RED)
-        d.text((x + 30, yy + int(size * .018)), t.upper(), font=cond(int(size * .028)), fill=BLACK)
-        if s2:
-            d.text((x + 30, yy + int(size * .058)), s2, font=body(int(size * .019)), fill=(90, 96, 106))
-    return canvas
-
 
 TEMPLATES = {
     "Main — pure white":      "main",
@@ -409,9 +445,7 @@ TEMPLATES = {
     "Angle grid":             "grid",
 }
 
-
 def render(kind, src, cfg, extras=None, bg=None, size=CANVAS):
-    """One entry point the UI can call for any template."""
     if kind == "main":
         return main_image(src, size)
     if kind == "hero":
@@ -432,15 +466,11 @@ def render(kind, src, cfg, extras=None, bg=None, size=CANVAS):
                           size)
     return main_image(src, size)
 
-
-# ------------------------------------------------------------------ auto plan
 CERT_RE  = re.compile(r"certif|standard|dot\b|ece\b|astm|cpsc|iso\b|fmvss|tested|compliance", re.I)
 STAT_RE  = re.compile(r"(\d+(?:\.\d+)?)\s*(kg|g|lb|lbs|oz|ml|l|litre|liter|cm|mm|inch|inches|hours?|hrs?)", re.I)
 USE_RE   = re.compile(r"\bfor\b|use|ride|commut|travel|touring|daily|everyday", re.I)
 
-
 def features_from_copy(title="", bullets=None, attributes=None):
-    """Pulls (heading, detail) pairs out of whatever copy is available."""
     out, seen = [], set()
     for b in (bullets or []):
         b = re.sub(r"\s+", " ", str(b)).strip()
@@ -466,11 +496,7 @@ def features_from_copy(title="", bullets=None, attributes=None):
                 seen.add(seg.lower()); out.append((" ".join(seg.split()[:2]).title(), seg))
     return out
 
-
-def plan_from_copy(title="", bullets=None, attributes=None, brand="",
-                   have_bg=False, n_extra=0, target=6):
-    """Decides the image set: which template goes in which slot, and what copy
-    each one carries. Strongest material first, per Amazon's slot conventions."""
+def plan_from_copy(title="", bullets=None, attributes=None, brand="", have_bg=False, n_extra=0, target=6):
     feats = features_from_copy(title, bullets, attributes)
     certs = [f for f in feats if CERT_RE.search(f[0] + " " + f[1])]
     stats = [f for f in feats if STAT_RE.search(f[0] + " " + f[1])]
