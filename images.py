@@ -23,13 +23,28 @@ GREY  = (232, 234, 238)
 DARK  = (28, 30, 34)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
 def _font(name, size):
-    for p in (os.path.join(HERE, "fonts", name),
-              f"/usr/share/fonts/truetype/google-fonts/{name}",
-              f"/usr/share/fonts/truetype/dejavu/{name}"):
+    """Robust font loader supporting custom files and reliable system fallbacks."""
+    candidates = [
+        os.path.join(HERE, "fonts", name),
+        f"/usr/share/fonts/truetype/google-fonts/{name}",
+        f"/usr/share/fonts/truetype/dejavu/{name}",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
+    ]
+    for p in candidates:
         if os.path.exists(p):
-            return ImageFont.truetype(p, size)
-    return ImageFont.load_default()
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    # Fallback to default if nothing else is found
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return ImageFont.load_default()
 
 def display(size):  return _font("Anton-Regular.ttf", size)          # headlines
 def cond(size):     return _font("BarlowCondensed-Bold.ttf", size)   # sub-heads
@@ -46,8 +61,6 @@ def to_rgb(im):
     return im.convert("RGB")
 
 def cutout(im, tol=18):
-    """Returns (RGBA product with background removed, bbox). Removes white/grey studio
-    backgrounds cleanly while preserving dark products."""
     im = to_rgb(im)
     w, h = im.size
     px = im.load()
@@ -68,27 +81,35 @@ def fit(im, box_w, box_h):
     return im.resize((max(1, int(im.width * r)), max(1, int(im.height * r))), Image.LANCZOS)
 
 def wrap(draw, text, font, max_w):
-    """Splits long attributes/headings into 2-3 structured lines."""
+    """Splits long attributes/headings into clean multi-line blocks."""
     words, lines, cur = (text or "").split(), [], ""
     for w in words:
         t = f"{cur} {w}".strip()
-        if draw.textlength(t, font=font) <= max_w or not cur:
+        # Measure text width safely
+        try:
+            length = draw.textlength(t, font=font)
+        except Exception:
+            length = len(t) * (font.size if hasattr(font, 'size') else 12)
+        
+        if length <= max_w or not cur:
             cur = t
         else:
             lines.append(cur); cur = w
     if cur: lines.append(cur)
     return lines
 
-def draw_lines_with_shadow(draw, xy, lines, font, fill, shadow_fill=(10, 10, 10, 200), leading=1.1, shadow_offset=3):
-    """Draws multi-line text with an active drop shadow to keep high contrast over any background."""
+def draw_lines_with_shadow(draw, xy, lines, font, fill, shadow_fill=(10, 10, 10, 220), leading=1.15, shadow_offset=4):
+    """Draws multi-line text with high-contrast drop shadows for absolute visibility."""
     x, y = xy
-    asc = font.getbbox("Hg")[3] - font.getbbox("Hg")[1]
+    try:
+        asc = font.getbbox("Hg")[3] - font.getbbox("Hg")[1]
+    except Exception:
+        asc = 35
     for ln in lines:
-        # Drop shadow for readability
         if shadow_fill:
             draw.text((x + shadow_offset, y + shadow_offset), ln, font=font, fill=shadow_fill)
         draw.text((x, y), ln, font=font, fill=fill)
-        y += int(asc * leading) + 8
+        y += int(asc * leading) + 10
     return y
 
 def hex_pattern(canvas, colour=(255, 255, 255), alpha=16, step=120):
@@ -122,12 +143,11 @@ def shadow(canvas, prod, pos, blur=42, opacity=110):
     sh = sh.filter(ImageFilter.GaussianBlur(blur))
     return Image.alpha_composite(canvas.convert("RGBA"), sh).convert("RGB")
 
-def red_rule(d, x, y, w=220, h=12):
+def red_rule(d, x, y, w=240, h=14):
     d.rectangle([x, y, x + w, y + h], fill=RED)
 
 # ------------------------------------------------------------------ templates
 def main_image(src, size=CANVAS, fill=MAIN_FILL):
-    """Slot 1. Pure white, product at ~85% frame fill, nothing else."""
     prod, bbox = cutout(src)
     prod = prod.crop(bbox)
     target = int(size * fill)
@@ -144,11 +164,11 @@ def main_image(src, size=CANVAS, fill=MAIN_FILL):
     return canvas
 
 def hero(src, headline, accent, subline="", size=CANVAS, bg=None):
-    """Proportional multi-line headline with dynamic contrast overlay."""
+    """Large, bold, multi-line typography card layout with background compositing."""
     if bg is not None:
         canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
-        # Dark translucent overlay to guarantee text readability on bright/noisy photos
-        veil = Image.new("RGBA", (size, size), (15, 17, 23, 150))
+        # Deep translucent dark veil to guarantee headline readability on any photo
+        veil = Image.new("RGBA", (size, size), (15, 17, 23, 130))
         canvas = Image.alpha_composite(canvas.convert("RGBA"), veil).convert("RGB")
     else:
         canvas = gradient((size, size), (44, 47, 54), (12, 13, 15))
@@ -161,40 +181,40 @@ def hero(src, headline, accent, subline="", size=CANVAS, bg=None):
     canvas = shadow(canvas, prod, pos, blur=55, opacity=140)
     canvas.paste(prod, pos, prod)
 
-    # Text Block Container (High Contrast Card)
+    # Large Typography Styling & Card Container
     d = ImageDraw.Draw(canvas)
-    m = int(size * .05)
-    f1 = display(int(size * .095))      # Larger headline font
-    fb = body_b(int(size * .032))      # Larger subline font
+    m = int(size * .06)
+    f1 = display(int(size * .11))      # Large punchy headline size (~220px)
+    fb = body_b(int(size * .035))     # Readable subline size (~70px)
 
-    # Draw semi-transparent card under text area so text stands out completely
-    card_w = int(size * 0.54)
+    card_w = int(size * 0.58)
+    
+    # Semi-transparent backing card so text never blends into background scenery
     card_overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     cd = ImageDraw.Draw(card_overlay)
-    cd.rounded_rectangle([m - 15, m - 15, m + card_w, int(size * 0.88)], radius=24, fill=(10, 12, 18, 170))
+    cd.rounded_rectangle([m - 20, m - 20, m + card_w, int(size * 0.90)], radius=28, fill=(10, 12, 18, 180))
     canvas = Image.alpha_composite(canvas.convert("RGBA"), card_overlay).convert("RGB")
     d = ImageDraw.Draw(canvas)
 
     y = m + 10
     if headline:
-        hl_lines = wrap(d, headline.upper(), f1, card_w - 30)
-        y = draw_lines_with_shadow(d, (m, y), hl_lines, f1, WHITE)
+        hl_lines = wrap(d, headline.upper(), f1, card_w - 40)
+        y = draw_lines_with_shadow(d, (m, y), hl_lines, f1, WHITE, leading=1.05)
 
     if accent:
-        acc_lines = wrap(d, accent.upper(), f1, card_w - 30)
-        y = draw_lines_with_shadow(d, (m, y), acc_lines, f1, RED)
+        acc_lines = wrap(d, accent.upper(), f1, card_w - 40)
+        y = draw_lines_with_shadow(d, (m, y), acc_lines, f1, RED, leading=1.05)
 
-    red_rule(d, m, y + 10, int(size * .14), int(size * .008))
-    y += int(size * .04)
+    red_rule(d, m, y + 14, int(size * .16), int(size * .009))
+    y += int(size * .05)
 
     if subline:
-        sub_lines = wrap(d, subline, fb, card_w - 30)
-        draw_lines_with_shadow(d, (m, y), sub_lines, fb, GREY, shadow_fill=(0,0,0,220), leading=1.3)
+        sub_lines = wrap(d, subline, fb, card_w - 40)
+        draw_lines_with_shadow(d, (m, y), sub_lines[:3], fb, GREY, shadow_fill=(0,0,0,240), leading=1.3)
 
     return canvas
 
 def badge_card(src, headline, accent, badges, size=CANVAS, bg=None):
-    """Top bar headline with vertical high-contrast attribute cards."""
     if bg is not None:
         canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
         veil = Image.new("RGBA", (size, size), (15, 17, 23, 110))
@@ -221,7 +241,10 @@ def badge_card(src, headline, accent, badges, size=CANVAS, bg=None):
 
     for ln in lines[:1]:
         d.text((m, yy), ln, font=f1, fill=WHITE)
-        wln = d.textlength(ln, font=f1)
+        try:
+            wln = d.textlength(ln, font=f1)
+        except Exception:
+            wln = len(ln) * 25
         if accent: d.text((m + wln + 18, yy), accent.upper(), font=f1, fill=RED)
 
     y = int(size * .22)
@@ -241,7 +264,6 @@ def badge_card(src, headline, accent, badges, size=CANVAS, bg=None):
     return canvas
 
 def callouts(src, items, headline="", size=CANVAS):
-    """Product centered with feature callout cards split onto both sides."""
     canvas = gradient((size, size), (243, 244, 246), (214, 217, 222))
     prod, bbox = cutout(src); prod = prod.crop(bbox)
     prod = fit(prod, int(size * .48), int(size * .48))
@@ -265,9 +287,8 @@ def callouts(src, items, headline="", size=CANVAS):
             x = int(size * .04) if side == "l" else int(size * .62)
             w = int(size * .34)
 
-            # Card background behind feature text for clarity
             d.rounded_rectangle([x - 10, y - 8, x + w + 10, y + int(size * .20)], radius=12,
-                                fill=(255, 255, 255, 220), outline=(200, 204, 210), width=2)
+                                fill=(255, 255, 255, 230), outline=(200, 204, 210), width=2)
             d.text((x, y), title.upper(), font=fh, fill=RED)
             ly = y + int(size * .045)
             
@@ -284,13 +305,15 @@ def callouts(src, items, headline="", size=CANVAS):
     return canvas
 
 def angle_grid(images, labels=None, headline="360 view", accent="every angle covered", size=CANVAS):
-    """Four-up grid of product angles with readable text tabs."""
     canvas = gradient((size, size), (245, 246, 248), (223, 226, 231))
     d = ImageDraw.Draw(canvas)
     f1 = display(int(size * .06))
     m = int(size * .045)
     d.text((m, int(size * .04)), headline.upper(), font=f1, fill=BLACK)
-    wln = d.textlength(headline.upper(), font=f1)
+    try:
+        wln = d.textlength(headline.upper(), font=f1)
+    except Exception:
+        wln = len(headline.upper()) * 25
     d.text((m + wln + 16, int(size * .04)), accent.upper(), font=f1, fill=RED)
     red_rule(d, m, int(size * .04) + int(size * .075), int(size * .12), 10)
 
@@ -309,14 +332,16 @@ def angle_grid(images, labels=None, headline="360 view", accent="every angle cov
         canvas.paste(p, (px, py), p)
         d = ImageDraw.Draw(canvas)
         tag = labels[i] if i < len(labels) else ""
-        tw = d.textlength(tag.upper(), font=cond(int(size * .026)))
+        try:
+            tw = d.textlength(tag.upper(), font=cond(int(size * .026)))
+        except Exception:
+            tw = len(tag.upper()) * 15
         d.rectangle([cx + 16, cy + 16, cx + 45 + tw, cy + 16 + int(size * .048)], fill=BLACK)
         d.rectangle([cx + 16, cy + 16, cx + 24, cy + 16 + int(size * .048)], fill=RED)
         d.text((cx + 34, cy + 22), tag.upper(), font=cond(int(size * .026)), fill=WHITE)
     return canvas
 
 def spec_card(src, headline, accent, stat, stat_label, chips=None, size=CANVAS, bg=None):
-    """Large numerical statistic with dark badges for key metrics."""
     if bg is not None:
         canvas = fit(to_rgb(bg), size, size).resize((size, size), Image.LANCZOS)
         veil = Image.new("RGBA", (size, size), (245, 246, 248, 170))
@@ -352,7 +377,10 @@ def spec_card(src, headline, accent, stat, stat_label, chips=None, size=CANVAS, 
     if stat:
         fs = display(int(size * .16))
         d.text((m, int(size * .44)), str(stat), font=fs, fill=BLACK)
-        w = d.textlength(str(stat), font=fs)
+        try:
+            w = d.textlength(str(stat), font=fs)
+        except Exception:
+            w = len(str(stat)) * 60
         d.text((m + w + 14, int(size * .52)), stat_label or "", font=cond(int(size * .045)), fill=RED)
 
     for i, (t, s2) in enumerate((chips or [])[:3]):
@@ -370,9 +398,7 @@ def spec_card(src, headline, accent, stat, stat_label, chips=None, size=CANVAS, 
             d.text((x + 22, yy + int(size * .065)), "\n".join(s2_lines[:2]), font=body(int(size * .02)), fill=(90, 96, 106))
     return canvas
 
-# ------------------------------------------------------------------ compliance
 def audit_image(im, is_main=False):
-    """Checks an image against Amazon's published standards."""
     out = []
     w, h = im.size
     longest = max(w, h)
