@@ -152,7 +152,6 @@ with st.sidebar:
     st.caption("**Field limits**  \nTitle 75 · Highlights 125 · Bullets 150–200 each, "
                "1000 total · Search terms 249 bytes")
 
-# Tabs placed in precise requested sequence
 tabs = st.tabs(["Build a listing", "Improve a listing", "Keyword research", "Rules", "Listing images", "AI generation"])
 
 # ================================================================ BUILD (Tab 0)
@@ -172,7 +171,7 @@ with tabs[0]:
         st.markdown('<div class="lbl"><b>1 · Brand name</b></div>', unsafe_allow_html=True)
         brand = st.text_input("br", key="f_brand", label_visibility="collapsed", placeholder="Rider")
     with r1c2:
-        st.markdown('<div class="lbl"><b>2 · Attribute 1 — the strongest qualifier</b></div>',
+        st.markdown('<div class="lbl"><b>2 · Attribute 1 — strongest qualifier</b></div>',
                     unsafe_allow_html=True)
         a1 = st.text_input("a1", key="f_a1", label_visibility="collapsed",
                            placeholder="Real Carbon Fibre")
@@ -196,11 +195,11 @@ with tabs[0]:
 
     r3c1, r3c2 = st.columns(2)
     with r3c1:
-        st.markdown('<div class="lbl"><b>7 · Attribute 3</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>7 · Attribute 3 (Highlight Focus)</b></div>', unsafe_allow_html=True)
         a3 = st.text_input("a3", key="f_a3", label_visibility="collapsed",
                            placeholder="DOT and ECE Certified")
     with r3c2:
-        st.markdown('<div class="lbl"><b>8 · Attribute 4</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>8 · Attribute 4 (Highlight Focus)</b></div>', unsafe_allow_html=True)
         a4 = st.text_input("a4", key="f_a4", label_visibility="collapsed",
                            placeholder="Flip Up Chin Bar")
 
@@ -214,15 +213,11 @@ with tabs[0]:
         placeholder="Superior Ventilation System: top and rear vents keep air moving\n"
                     "Retractable sun visor cuts glare without swapping shields\n"
                     "Quick release buckle opens with one hand")
-    st.caption("Write your own ALL CAPS heading followed by a colon and it is kept as the bullet "
-               "heading. Styled or bold pasted text is folded back to plain characters, since "
-               "Amazon rejects those symbols.")
     st.button("Clear all boxes", key="f_clear", on_click=clear_build)
 
     feats, fmode = C.parse_bullets(feat_raw, maxb)
     if C.is_paragraph(feat_raw):
         feats = [x.split(": ", 1)[-1] for x in feats]
-        st.caption(f"Paragraph detected and split into {len(feats)} feature points.")
 
     if C.ws(brand) and C.ws(ptype):
         facts = C.Facts(brand=brand, product_type=ptype, attr1=a1, attr2=a2, attr3=a3, attr4=a4,
@@ -249,35 +244,20 @@ with tabs[0]:
                                 for x in res["to_bullets"]) or "_nothing left over_",
                         unsafe_allow_html=True)
 
-        problems = {k: v for k, v in res["logic"].items() if v}
-        if problems:
-            for num, msgs in problems.items():
-                for m in msgs:
-                    st.markdown(f'<div class="iss error"><b>Bullet {num}</b> &nbsp;{C.esc(m)}</div>',
-                                unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="iss ok"><b>Checked</b> &nbsp;Every bullet has one heading, no '
-                        'repeated clause, and no clause opening or closing on a conjunction.</div>',
-                        unsafe_allow_html=True)
-
         copy_out(title, high, bullets, key="b")
         st.session_state["listing"] = {"title": title, "high": high, "bullets": bullets,
                                        "brand": brand, "features": feats}
-        with st.expander("Field-by-field check"):
-            for a in au:
-                label(a.field, a.count, a.limit)
-                issues(a)
     else:
         st.info("Enter a brand name and a product type to see the listing.")
 
 # ================================================================ IMPROVE (Tab 1)
 with tabs[1]:
     st.markdown("### Paste your current listing")
-    st.caption("The raw title is mined for features. Attribute 1 & 2 take priority, Size & Gender "
-               "are sneaked at the end, and remaining keywords cascade into Item Highlights.")
+    st.caption("Attributes 1 & 2 build the title structure. Attributes 3 & 4 directly target Highlights. "
+               "Duplicate terms from the refreshed title are filtered out from Item Highlights.")
 
     def clear_imp():
-        for k in ("i_brand","i_title","i_bul","i_a1","i_a2","i_size","i_gender"):
+        for k in ("i_brand","i_title","i_bul","i_a1","i_a2","i_a3","i_a4","i_size","i_gender"):
             if k in st.session_state:
                 st.session_state[k] = ""
 
@@ -301,12 +281,13 @@ with tabs[1]:
         st.markdown("".join(f'<span class="chip ok">{C.esc(x)}</span>' for x in chips),
                     unsafe_allow_html=True)
 
+    # Row 1: Priority Title Attributes
     jc1, jc2, jc3, jc4 = st.columns(4)
     with jc1:
-        st.markdown('<div class="lbl"><b>Attribute 1 (Priority 1)</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>Attribute 1 (Title Priority 1)</b></div>', unsafe_allow_html=True)
         ia1 = st.text_input("ia1", key="i_a1", label_visibility="collapsed", placeholder="ABS Shell")
     with jc2:
-        st.markdown('<div class="lbl"><b>Attribute 2 (Priority 2)</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>Attribute 2 (Title Priority 2)</b></div>', unsafe_allow_html=True)
         ia2 = st.text_input("ia2", key="i_a2", label_visibility="collapsed", placeholder="Matte Black")
     with jc3:
         st.markdown('<div class="lbl"><b>Size (Tail)</b></div>', unsafe_allow_html=True)
@@ -315,6 +296,15 @@ with tabs[1]:
     with jc4:
         st.markdown('<div class="lbl"><b>Gender (Last Priority)</b></div>', unsafe_allow_html=True)
         igender = st.text_input("ign", key="i_gender", label_visibility="collapsed", placeholder="Kids / Unisex")
+
+    # Row 2: Dedicated Highlight Attributes
+    hc1, hc2 = st.columns(2)
+    with hc1:
+        st.markdown('<div class="lbl"><b>Attribute 3 (Focus: Item Highlights)</b></div>', unsafe_allow_html=True)
+        ia3 = st.text_input("ia3", key="i_a3", label_visibility="collapsed", placeholder="CPSC & DOT Certified")
+    with hc2:
+        st.markdown('<div class="lbl"><b>Attribute 4 (Focus: Item Highlights)</b></div>', unsafe_allow_html=True)
+        ia4 = st.text_input("ia4", key="i_a4", label_visibility="collapsed", placeholder="11 Air Vents Ventilation")
 
     st.markdown('<div class="lbl"><b>Current bullets — one per line, a paragraph, or leave empty'
                 '</b></div>', unsafe_allow_html=True)
@@ -329,6 +319,8 @@ with tabs[1]:
             product_type=mined["product_type"],
             attr1=ia1 or (mined["features"][0] if mined["features"] else ""),
             attr2=ia2 or (mined["features"][1] if len(mined["features"]) > 1 else ""),
+            attr3=ia3,
+            attr4=ia4,
             size_gender=tail_spec,
             features=mined["features"]
         )
@@ -429,7 +421,7 @@ with tabs[2]:
         st.markdown('<div class="lbl"><b>Marketplace</b></div>', unsafe_allow_html=True)
         mkt = st.selectbox("mk", list(MARKETS), label_visibility="collapsed",
                            disabled=(src != "Amazon"))
-    expand = st.checkbox("Expand A to Z for long-tail terms (fetches 200+ suggestions)", value=True)
+    expand = st.checkbox("Expand A to Z for long-tail terms", value=True)
     if st.button("Fetch keywords", type="primary", key="k_go"):
         with st.spinner(f"Asking {src}…"):
             rows, err = fetch(seed, src, MARKETS[mkt], expand)
@@ -442,7 +434,7 @@ with tabs[2]:
     rows = st.session_state.get("k_rows", [])
 
     if rows:
-        st.caption(f"Showing all {len(rows)} discovered keywords ordered by relevance/volume score:")
+        st.caption(f"Showing all {len(rows)} discovered keywords ordered by score:")
         st.markdown("".join(
             f'<span class="chip" style="background:{C.volume_colour(r["score"])[0]};'
             f'color:{C.volume_colour(r["score"])[1]};border-color:{C.volume_colour(r["score"])[2]}">'
@@ -484,10 +476,9 @@ with tabs[3]:
     st.markdown(f"""
 **Title — {C.TITLE_LIMIT} characters**
 `[Brand] + [Attribute 1] + [Product Type], [Attribute 2], [Size / Gender]`
-Commas separate rather than brackets. Units are abbreviated (oz, lb, ct).
 
 **Item Highlights — {C.HIGHLIGHT_LIMIT} characters**
-`[Primary material or spec] ; [core differentiator or use case]`
+Focused on Attribute 3, Attribute 4, and non-duplicate key specifications.
 
 **Bullets — {C.BULLET_MIN} to {C.BULLET_MAX} characters each**
 `[ALL CAPS HEADER]: [benefit-first statement]; [supporting feature detail]`
@@ -496,7 +487,7 @@ Commas separate rather than brackets. Units are abbreviated (oz, lb, ct).
 Unique single words, all lowercase, single spaces. Max 249 bytes.
 """)
 
-# ================================================================ LISTING IMAGES (Tab 4 - Placed at last)
+# ================================================================ IMAGES (Tab 4)
 def _show_gallery(built, asin, keyprefix):
     files = []
     for i, (name, im, is_main) in enumerate(built):
@@ -504,21 +495,8 @@ def _show_gallery(built, asin, keyprefix):
         fname = IMG.filename(asin, 0 if is_main else i)
         files.append((fname, data))
         st.markdown(f"#### {i+1}. {name}")
-        st.markdown(f'<div class="lbl"><b>{fname}</b><span class="ok">{im.size[0]} x {im.size[1]} '
-                    f'· {len(data)/1024:.0f} KB</span></div>', unsafe_allow_html=True)
         st.image(im, use_container_width=True)
-        for sev, msg in IMG.audit_image(im, is_main=is_main):
-            tag = {"error": "Fix", "warn": "Check", "ok": "OK"}[sev]
-            st.markdown(f'<div class="iss {sev}"><b>{tag}</b> &nbsp;{C.esc(msg)}</div>',
-                        unsafe_allow_html=True)
-        st.download_button(f"Download {fname}", data, fname, "image/jpeg",
-                           key=f"{keyprefix}dl{i}")
-    if files:
-        st.markdown("---")
-        st.download_button("Download the whole gallery (.zip)", IMG.build_zip(files),
-                           f"{IMG.safe_asin(asin)}_images.zip", "application/zip",
-                           type="primary", key=f"{keyprefix}zip")
-        st.caption("Named to Amazon's convention: ASIN.MAIN.jpg, then ASIN.PT01.jpg and onward.")
+        st.download_button(f"Download {fname}", data, fname, "image/jpeg", key=f"{keyprefix}dl{i}")
     return files
 
 def _pairs(txt, fallback=""):
@@ -530,63 +508,31 @@ def _pairs(txt, fallback=""):
 
 with tabs[4]:
     st.markdown("### Build each image yourself")
-    st.caption("Add as many slots as you need. Every slot picks its own template, carries its own "
-               "headline and callouts, and can take its own background photo.")
-
-    up = st.file_uploader("Product photo on a plain background",
-                          type=["jpg", "jpeg", "png", "webp"], key="m_main")
-    extras_up = st.file_uploader("More angles, optional — used by the grid template",
-                                 type=["jpg", "jpeg", "png", "webp"],
-                                 accept_multiple_files=True, key="m_extra")
-    st.markdown('<div class="lbl"><b>ASIN or SKU for the file names</b></div>', unsafe_allow_html=True)
-    m_asin = st.text_input("ma", key="m_asin", label_visibility="collapsed",
-                           placeholder="B0XXXXXXXX")
+    up = st.file_uploader("Product photo on a plain background", type=["jpg", "jpeg", "png", "webp"], key="m_main")
+    extras_up = st.file_uploader("More angles", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="m_extra")
+    m_asin = st.text_input("ASIN or SKU", key="m_asin", placeholder="B0XXXXXXXX")
     n_slots = st.number_input("How many images", 1, 9, 5, key="m_n")
 
     tmpl_names = list(IMG.TEMPLATES.keys())
-    defaults = ["Main — pure white", "Hero benefit", "Feature callouts",
-                "Certification badges", "Spec or statistic", "Angle grid",
-                "Hero benefit", "Feature callouts", "Spec or statistic"]
+    defaults = ["Main — pure white", "Hero benefit", "Feature callouts", "Certification badges", "Spec or statistic"]
     slots = []
     for i in range(int(n_slots)):
         with st.expander(f"Image {i+1}", expanded=(i < 2)):
-            kind_label = st.selectbox("Template", tmpl_names, key=f"m_k{i}",
-                                      index=tmpl_names.index(defaults[i % len(defaults)]))
+            kind_label = st.selectbox("Template", tmpl_names, key=f"m_k{i}", index=tmpl_names.index(defaults[i % len(defaults)]))
             kind = IMG.TEMPLATES[kind_label]
             bgf = None
             cfg = {}
             if kind != "main":
                 c1, c2 = st.columns(2)
-                with c1:
-                    cfg["headline"] = st.text_input("Headline", key=f"m_h{i}",
-                                                    placeholder="Ready for")
-                with c2:
-                    cfg["accent"] = st.text_input("Accent, shown in red", key=f"m_a{i}",
-                                                  placeholder="any road")
-                if kind in ("hero",):
-                    cfg["subline"] = st.text_area("Sub-line", key=f"m_s{i}", height=70)
+                with c1: cfg["headline"] = st.text_input("Headline", key=f"m_h{i}")
+                with c2: cfg["accent"] = st.text_input("Accent, shown in red", key=f"m_a{i}")
+                if kind in ("hero",): cfg["subline"] = st.text_area("Sub-line", key=f"m_s{i}", height=70)
                 if kind in ("callouts", "badge", "spec"):
-                    cfg["items"] = _pairs(st.text_area(
-                        "Callouts — one per line, \"title | description\"",
-                        key=f"m_i{i}", height=110,
-                        placeholder="Optimal airflow | Top and rear vents circulate air"))
-                if kind == "spec":
-                    s1, s2 = st.columns(2)
-                    with s1: cfg["stat"] = st.text_input("Big number", key=f"m_n{i}b",
-                                                         placeholder="1.48")
-                    with s2: cfg["stat_label"] = st.text_input("Unit", key=f"m_u{i}",
-                                                              placeholder="kg")
-                if kind == "grid":
-                    cfg["labels"] = C.parse_lines(st.text_area(
-                        "Grid labels, one per line", key=f"m_g{i}", height=90,
-                        placeholder="Front view\nSide view\nTop view\nAngled view")) or None
-                bgf = st.file_uploader("Background photo for this image, optional",
-                                       type=["jpg", "jpeg", "png", "webp"], key=f"m_bg{i}")
+                    cfg["items"] = _pairs(st.text_area("Callouts", key=f"m_i{i}", height=110))
+                bgf = st.file_uploader("Background photo, optional", type=["jpg", "jpeg", "png", "webp"], key=f"m_bg{i}")
             slots.append((kind_label, kind, cfg, bgf))
 
-    if up is None:
-        st.info("Upload a product photo to start building.")
-    else:
+    if up is not None:
         try:
             src = Image.open(up)
             others = [Image.open(f) for f in (extras_up or [])]
@@ -594,78 +540,36 @@ with tabs[4]:
             with st.spinner("Rendering…"):
                 for label_, kind, cfg, bgf in slots:
                     bg = Image.open(bgf) if bgf else None
-                    built.append((label_, IMG.render(kind, src, cfg, extras=others, bg=bg),
-                                  kind == "main"))
-            st.markdown("---")
+                    built.append((label_, IMG.render(kind, src, cfg, extras=others, bg=bg), kind == "main"))
             _show_gallery(built, m_asin, "man")
         except Exception as e:
             st.error(f"Could not render: {e}")
 
-# ================================================================ AI GENERATION (Tab 5 - Placed at last)
+# ================================================================ AI GENERATION (Tab 5)
 with tabs[5]:
     st.markdown("### Generate the set automatically")
-    st.caption("Upload the product photo and a background, point it at your copy, and the whole "
-               "gallery is planned and rendered in one pass.")
-
-    a_up = st.file_uploader("Product photo on a plain background",
-                            type=["jpg", "jpeg", "png", "webp"], key="a_main")
-    a_bg = st.file_uploader("Background photo for the lifestyle and hero slots",
-                            type=["jpg", "jpeg", "png", "webp"], key="a_bg")
-    a_extra = st.file_uploader("More angles, optional", type=["jpg", "jpeg", "png", "webp"],
-                               accept_multiple_files=True, key="a_extra")
+    a_up = st.file_uploader("Product photo", type=["jpg", "jpeg", "png", "webp"], key="a_main")
+    a_bg = st.file_uploader("Background photo", type=["jpg", "jpeg", "png", "webp"], key="a_bg")
+    a_extra = st.file_uploader("More angles", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="a_extra")
 
     L = st.session_state.get("listing", {})
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown('<div class="lbl"><b>ASIN or SKU</b></div>', unsafe_allow_html=True)
-        a_asin = st.text_input("aa", key="a_asin", label_visibility="collapsed",
-                               placeholder="B0XXXXXXXX")
-        st.markdown('<div class="lbl"><b>Title</b></div>', unsafe_allow_html=True)
-        a_title = st.text_input("at", key="a_title", label_visibility="collapsed",
-                                value=L.get("title", ""))
-    with c2:
-        st.markdown('<div class="lbl"><b>How many images</b></div>', unsafe_allow_html=True)
-        a_n = st.slider("an", 5, 9, 6, key="a_n", label_visibility="collapsed")
-        st.markdown('<div class="lbl"><b>Attributes, optional — "name | detail" per line</b></div>',
-                    unsafe_allow_html=True)
-        a_attrs = st.text_area("ax", key="a_attrs", height=88, label_visibility="collapsed",
-                               placeholder="Real Carbon Fibre | keeps weight to 1.48 kg")
+    a_asin = st.text_input("ASIN or SKU", key="a_asin", placeholder="B0XXXXXXXX")
+    a_title = st.text_input("Title", key="a_title", value=L.get("title", ""))
+    a_bul = st.text_area("Bullets", key="a_bul", height=150, value="\n".join(L.get("bullets", [])))
 
-    st.markdown('<div class="lbl"><b>Bullets — paste them raw, one per line</b></div>',
-                unsafe_allow_html=True)
-    a_bul = st.text_area("ab", key="a_bul", height=150, label_visibility="collapsed",
-                         value="\n".join(L.get("bullets", [])),
-                         placeholder="SUPERIOR VENTILATION: top and rear vents keep air moving")
-
-    if a_up is None:
-        st.info("Upload a product photo to generate the set.")
-    else:
+    if a_up is not None:
         try:
             src = Image.open(a_up)
             bg = Image.open(a_bg) if a_bg else None
             others = [Image.open(f) for f in (a_extra or [])]
             bullets = C.parse_lines(a_bul)
-            attrs = C.parse_lines(a_attrs)
-            plan = IMG.plan_from_copy(a_title, bullets, attrs, have_bg=bg is not None,
-                                      n_extra=len(others), target=int(a_n))
-
-            st.markdown("#### The plan")
-            for i, p in enumerate(plan, 1):
-                bits = p["cfg"].get("headline") or ""
-                acc = p["cfg"].get("accent") or ""
-                cnt = len(p["cfg"].get("items", []) or [])
-                st.markdown(f'<span class="chip ok">{i}. {C.esc(p["name"])}'
-                            f'{" — " + C.esc((bits + " " + acc).strip()) if bits else ""}'
-                            f'{f" · {cnt} callouts" if cnt else ""}</span>', unsafe_allow_html=True)
+            plan = IMG.plan_from_copy(a_title, bullets, have_bg=bg is not None, n_extra=len(others))
 
             built = []
-            with st.spinner("Rendering the gallery…"):
+            with st.spinner("Rendering gallery…"):
                 for p in plan:
                     use_bg = bg if p.get("use_bg") else None
-                    built.append((p["name"], IMG.render(p["kind"], src, p["cfg"],
-                                                        extras=others, bg=use_bg),
-                                  p["kind"] == "main"))
-            st.markdown("---")
+                    built.append((p["name"], IMG.render(p["kind"], src, p["cfg"], extras=others, bg=use_bg), p["kind"] == "main"))
             _show_gallery(built, a_asin, "ai")
         except Exception as e:
             st.error(f"Could not generate: {e}")
