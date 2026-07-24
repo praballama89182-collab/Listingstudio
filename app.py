@@ -272,12 +272,13 @@ with tabs[0]:
 # ================================================================ IMPROVE
 with tabs[1]:
     st.markdown("### Paste your current listing")
-    st.caption("The raw title is mined for every feature it contains. Bullets can be pasted one "
-               "per line or as a paragraph, and short ones are rebuilt to Amazon's length.")
+    st.caption("The raw title is mined for features. Attribute 1 & 2 take priority, Size & Gender "
+               "are sneaked at the end, and remaining keywords cascade into Item Highlights.")
 
     def clear_imp():
-        for k in ("i_brand","i_title","i_bul","i_a1","i_a2","i_size"):
-            st.session_state[k] = ""
+        for k in ("i_brand","i_title","i_bul","i_a1","i_a2","i_size","i_gender"):
+            if k in st.session_state:
+                st.session_state[k] = ""
 
     ic1, ic2 = st.columns([1, 2])
     with ic1:
@@ -299,17 +300,20 @@ with tabs[1]:
         st.markdown("".join(f'<span class="chip ok">{C.esc(x)}</span>' for x in chips),
                     unsafe_allow_html=True)
 
-    jc1, jc2, jc3 = st.columns(3)
+    jc1, jc2, jc3, jc4 = st.columns(4)
     with jc1:
-        st.markdown('<div class="lbl"><b>Attribute 1</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>Attribute 1 (Priority 1)</b></div>', unsafe_allow_html=True)
         ia1 = st.text_input("ia1", key="i_a1", label_visibility="collapsed", placeholder="ABS Shell")
     with jc2:
-        st.markdown('<div class="lbl"><b>Attribute 2</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>Attribute 2 (Priority 2)</b></div>', unsafe_allow_html=True)
         ia2 = st.text_input("ia2", key="i_a2", label_visibility="collapsed", placeholder="Matte Black")
     with jc3:
-        st.markdown('<div class="lbl"><b>Size</b></div>', unsafe_allow_html=True)
+        st.markdown('<div class="lbl"><b>Size (Tail)</b></div>', unsafe_allow_html=True)
         isize = st.text_input("isz", key="i_size", label_visibility="collapsed",
-                              placeholder=(mined or {}).get("pack") or (mined or {}).get("size") or "3/4")
+                              placeholder=(mined or {}).get("pack") or (mined or {}).get("size") or "Medium")
+    with jc4:
+        st.markdown('<div class="lbl"><b>Gender (Last Priority)</b></div>', unsafe_allow_html=True)
+        igender = st.text_input("ign", key="i_gender", label_visibility="collapsed", placeholder="Kids / Unisex")
 
     st.markdown('<div class="lbl"><b>Current bullets — one per line, a paragraph, or leave empty'
                 '</b></div>', unsafe_allow_html=True)
@@ -318,11 +322,17 @@ with tabs[1]:
     st.button("Clear all boxes", key="i_clear", on_click=clear_imp)
 
     if mined and C.ws(iraw):
-        facts = C.Facts(brand=ibrand, product_type=mined["product_type"],
-                        attr1=ia1 or (mined["features"][0] if mined["features"] else ""),
-                        attr2=ia2, size_gender=isize or mined["pack"] or mined["size"],
-                        features=mined["features"])
-        _res = C.compose(facts, media, max_bullets=maxb)
+        tail_spec = ", ".join([x for x in [isize or mined["pack"] or mined["size"], igender] if C.ws(x)])
+        facts = C.Facts(
+            brand=ibrand, 
+            product_type=mined["product_type"],
+            attr1=ia1 or (mined["features"][0] if mined["features"] else ""),
+            attr2=ia2 or (mined["features"][1] if len(mined["features"]) > 1 else ""),
+            size_gender=tail_spec,
+            features=mined["features"]
+        )
+
+        _res = C.compose(facts, media, extra=mined["features"], max_bullets=maxb)
         title, high = _res["title"], _res["highlights"]
 
         pasted, bmode = C.parse_bullets(ibul, maxb)
@@ -463,11 +473,7 @@ with tabs[2]:
 with tabs[3]:
     st.markdown("### Generate the set automatically")
     st.caption("Upload the product photo and a background, point it at your copy, and the whole "
-               "gallery is planned and rendered in one pass. The plan reads your bullets, spots "
-               "the certifications and the numbers, and assigns each to the slot it belongs in.")
-    st.info("What this does and does not do: it composites your product, builds the graphics and "
-            "lays out the type. It does not invent photographic scenery, so the lifestyle shot "
-            "uses the background you upload.")
+               "gallery is planned and rendered in one pass.")
 
     a_up = st.file_uploader("Product photo on a plain background",
                             type=["jpg", "jpeg", "png", "webp"], key="a_main")
@@ -498,8 +504,6 @@ with tabs[3]:
     a_bul = st.text_area("ab", key="a_bul", height=150, label_visibility="collapsed",
                          value="\n".join(L.get("bullets", [])),
                          placeholder="SUPERIOR VENTILATION: top and rear vents keep air moving")
-    if L.get("bullets"):
-        st.caption("Pre-filled from the listing you built. Edit freely.")
 
     if a_up is None:
         st.info("Upload a product photo to generate the set.")
@@ -521,10 +525,6 @@ with tabs[3]:
                 st.markdown(f'<span class="chip ok">{i}. {C.esc(p["name"])}'
                             f'{" — " + C.esc((bits + " " + acc).strip()) if bits else ""}'
                             f'{f" · {cnt} callouts" if cnt else ""}</span>', unsafe_allow_html=True)
-
-            if not bullets and not attrs:
-                st.warning("No bullets or attributes given, so the plan falls back to the title "
-                           "alone. Paste your bullets for a much stronger set.")
 
             built = []
             with st.spinner("Rendering the gallery…"):
@@ -582,9 +582,7 @@ def fetch(seed, source, mid, expand):
     except Exception as e:
         return [], f"Could not reach {source}: {e}"
     if not disp:
-        return [], (f"Could not reach {source} ({errs[0] if errs else 'no results'}). Suggestion "
-                    "lookup needs outbound internet access, which some hosts block. Type your own "
-                    "keywords below instead.")
+        return [], "Could not reach suggestion engine."
     rows = [{"term": disp[k], "rank": rank[k], "freq": freq[k],
              "score": C.kw_score(rank[k], freq[k], source)} for k in disp]
     rows.sort(key=lambda r: (-r["score"], r["rank"]))
@@ -616,19 +614,6 @@ with tabs[4]:
     if st.session_state.get("k_err"): st.warning(st.session_state["k_err"])
     rows = st.session_state.get("k_rows", [])
 
-    legend = "".join(
-        f'<span class="chip" style="background:{C.volume_colour(v)[0]};'
-        f'color:{C.volume_colour(v)[1]};border-color:{C.volume_colour(v)[2]}">{lab}</span>'
-        for v, lab in [(95, "Strongest"), (70, "Strong"), (50, "Medium"), (25, "Low"), (5, "Weakest")])
-    st.markdown(f'<div style="background:#f7f9fc;border:1px solid #e7eaf3;border-radius:12px;'
-                f'padding:11px 14px;margin:10px 0;font-size:12.5px;color:#3a4256">'
-                f'<b>Colour key</b> &nbsp;{legend}<br><span style="color:#6b7391">Green is the '
-                f'strongest signal, shading through amber to red as it weakens. This is a '
-                f'<b>relevance proxy</b> from autocomplete position and how many searches surfaced '
-                f'the term, not true search volume — no free source publishes that. Use Brand '
-                f'Analytics or your Search Query Performance report for real volume.</span></div>',
-                unsafe_allow_html=True)
-
     if rows:
         st.markdown("".join(
             f'<span class="chip" style="background:{C.volume_colour(r["score"])[0]};'
@@ -637,21 +622,17 @@ with tabs[4]:
             unsafe_allow_html=True)
 
     st.markdown("### Send each keyword where it belongs")
-    st.markdown('<div class="lbl"><b>Your own keywords — one per line</b></div>', unsafe_allow_html=True)
     manual = st.text_area("mn", key="k_man", height=90, label_visibility="collapsed")
     pool = list(dict.fromkeys([r["term"] for r in rows] + C.parse_lines(manual)
                               + st.session_state.get("k_t", []) + st.session_state.get("k_b", [])
                               + st.session_state.get("k_s", [])))
     a1_, a2_, a3_ = st.columns(3)
     with a1_:
-        st.markdown('<div class="lbl"><b>Into the title</b></div>', unsafe_allow_html=True)
-        sel_t = st.multiselect("st", pool, key="k_t", label_visibility="collapsed")
+        sel_t = st.multiselect("Into title", pool, key="k_t", label_visibility="collapsed")
     with a2_:
-        st.markdown('<div class="lbl"><b>Into the bullets</b></div>', unsafe_allow_html=True)
-        sel_b = st.multiselect("sb", pool, key="k_b", label_visibility="collapsed")
+        sel_b = st.multiselect("Into bullets", pool, key="k_b", label_visibility="collapsed")
     with a3_:
-        st.markdown('<div class="lbl"><b>Into search terms</b></div>', unsafe_allow_html=True)
-        sel_s = st.multiselect("ss", pool, key="k_s", label_visibility="collapsed")
+        sel_s = st.multiselect("Into search terms", pool, key="k_s", label_visibility="collapsed")
 
     L = st.session_state.get("listing")
     if not L:
@@ -669,64 +650,20 @@ with tabs[4]:
         scorecard(au)
         copy_out(nt, L["high"], nb, back["terms"], key="k")
 
-        r1, r2 = st.columns(2)
-        with r1:
-            st.markdown("**Title keywords**")
-            for lst, kind in [(alr, "ok"), (add, "ok"), (fail, "bad")]:
-                for k in lst:
-                    tag = "already there" if lst is alr else ("added" if lst is add else "would not fit")
-                    st.markdown(f'<span class="chip {kind}">{C.esc(k)} — {tag}</span>',
-                                unsafe_allow_html=True)
-        with r2:
-            st.markdown("**Bullet keywords**")
-            for lst, kind in [(balr, "ok"), (badd, "ok"), (bfail, "bad")]:
-                for k in lst:
-                    tag = "already there" if lst is balr else ("added" if lst is badd else "did not fit")
-                    st.markdown(f'<span class="chip {kind}">{C.esc(k)} — {tag}</span>',
-                                unsafe_allow_html=True)
-
-        with st.expander("What the search-term cleanup removed, and why"):
-            st.markdown(
-                f"- **Already visible in your title, highlights or bullets** "
-                f"({len(back['dropped_visible'])}): `{', '.join(back['dropped_visible'][:30]) or 'none'}`\n"
-                f"- **Repeats or plural forms** ({len(back['dropped_dupe'])}): "
-                f"`{', '.join(back['dropped_dupe'][:30]) or 'none'}`\n"
-                f"- **Stop words and filler** ({len(back['dropped_stop'])}): "
-                f"`{', '.join(back['dropped_stop'][:30]) or 'none'}`\n"
-                f"- **Beyond 249 bytes** ({len(back['overflow'])}): "
-                f"`{', '.join(back['overflow'][:30]) or 'none'}`")
-            st.caption("Unique single words, lowercase, separated by single spaces. No commas — "
-                       "punctuation wastes bytes and breaks parsing. One byte over 249 and Amazon "
-                       "ignores the entire field.")
-
 # ================================================================ RULES
 with tabs[5]:
     st.markdown("### The rules this tool enforces")
     st.markdown(f"""
 **Title — {C.TITLE_LIMIT} characters**
 `[Brand] + [Attribute 1] + [Product Type], [Attribute 2], [Size]`
-Commas separate rather than brackets. Units are abbreviated (oz, lb, ct). The joining words
-*for* and *with* are dropped to move keywords forward. No special characters outside a brand
-name, no repeated words, no ALL-CAPS, no promotional claims. Media categories keep 200.
+Commas separate rather than brackets. Units are abbreviated (oz, lb, ct).
 
 **Item Highlights — {C.HIGHLIGHT_LIMIT} characters**
 `[Primary material or spec] ; [core differentiator or use case]`
-Searchable, and shown under the title on mobile. Materials, specs and use cases only — no
-pricing and no marketing fluff.
 
-**Bullets — {C.BULLET_MIN} to {C.BULLET_MAX} characters each, {C.BULLETS_TOTAL_MAX} across all five**
+**Bullets — {C.BULLET_MIN} to {C.BULLET_MAX} characters each**
 `[ALL CAPS HEADER]: [benefit-first statement]; [supporting feature detail]`
-Sentence fragments with no full stop. Clauses separated by semicolons. Numbers one to nine
-spelled out unless they are a measurement or model number, and always a space between a
-number and its unit. No bullet may begin or end on a conjunction.
 
 **Backend search terms — {C.BACKEND_BYTES} bytes**
-Unique single words, all lowercase, separated by single spaces. No commas or punctuation.
-Nothing repeated from the title, highlights, bullets or brand, since Amazon indexes the whole
-listing as one entity. Plurals are dropped because the algorithm handles them. Bytes are not
-characters: accented and non-Latin letters cost two to four bytes each, and a single byte over
-the limit causes Amazon to ignore every term in the field.
+Unique single words, all lowercase, single spaces. Max 249 bytes.
 """)
-    st.caption("Reflects Amazon's title update of 27 July 2026 and the current Seller Central "
-               "style guidance. Some categories, notably Pet Supplies and Apparel, cap titles "
-               "shorter than the global limit — confirm yours in Seller Central.")
